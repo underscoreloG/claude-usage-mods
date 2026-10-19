@@ -1,9 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentRow } from '../types'
+import type { AgentRow, SessionRow } from '../types'
+import { startSessionPoller } from './sessions'
 
 const agentsAtom = atom({ plugin: 'agents-band', key: 'agents' } as const, [])
+const sessionsAtom = atom({ plugin: 'agents-band', key: 'sessions' } as const, [] as SessionRow[])
 const nowAtom = atom({ plugin: 'agents-band', key: 'now' } as const, 0)
 const hiddenAtom = atom({ plugin: 'agents-band', key: 'isHidden' } as const, false)
 
@@ -35,6 +37,12 @@ export function fmtElapsed(ms: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`
 }
 
+export function fmtAgo(ms: number): string {
+  const m = Math.max(0, Math.floor(ms / 60_000))
+  if (m < 1) return 'just now'
+  return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`
+}
+
 export function visible(list: AgentRow[], now: number): AgentRow[] {
   return list.filter(a => a.status === 'running' || now - (a.endedAt ?? now) < LINGER_MS)
 }
@@ -47,26 +55,30 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'agentsband',
-      description: 'Show or hide the running-subagents rows above the prompt',
+      description: 'Show or hide the subagent and linked-session rows above the prompt',
     })
-    // live spinner and timers, only while something is on screen
+    // live spinner and timers, only while something on screen moves
     $.clock.every(250, () => {
       void (async () => {
         const now = await $.clock.now()
         const list = await read($, agentsAtom)
-        if (visible(list, now).length === 0) {
-          if (list.length > 0) await update($, agentsAtom, () => [])
-          return
-        }
-        await update($, nowAtom, () => now)
+        const isAgentShown = visible(list, now).length > 0
+        if (!isAgentShown && list.length > 0) await update($, agentsAtom, () => [])
+        const sessions = await read($, sessionsAtom)
+        const isSessionRunning = sessions.some(s => s.isRunning)
+        // idle sessions only show "Nm ago": a redraw every 30s is enough
+        const isAgoStale = sessions.length > 0 && now - (await read($, nowAtom)) >= 30_000
+        if (isAgentShown || isSessionRunning || isAgoStale) await update($, nowAtom, () => now)
       })()
     })
+    // sessions this one started, read from the desktop app every few seconds
+    startSessionPoller($)
     return next(e)
   })
 
   on('command.run', { command: 'agentsband' }, async $ => {
     const hidden = await update($, hiddenAtom, x => !x)
-    return { text: hidden ? 'Subagent rows hidden.' : 'Subagent rows shown.' }
+    return { text: hidden ? 'Subagent and session rows hidden.' : 'Subagent and session rows shown.' }
   })
 
   on('turn.start', async ($, e, next) => {
@@ -130,56 +142,92 @@ export const register: Register = on => {
     if (e.props.hasSurvey || (await read($, hiddenAtom))) return next(e)
     const now = await read($, nowAtom)
     const shown = visible(await read($, agentsAtom), now)
-    if (shown.length === 0) return next(e)
+    const sessions = await read($, sessionsAtom)
+    if (shown.length === 0 && sessions.length === 0) return next(e)
 
     const { Box, Text } = $.ui.resolve(e)
-    const running = shown.filter(a => a.status === 'running').length
-    const finished = shown.length - running
     const frame = SPINNER[Math.floor(now / 100) % SPINNER.length] ?? '•'
+    const sections = []
 
-    const rows = shown.slice(-MAX_ROWS).map(a => {
-      const icon = a.status === 'running' ? frame : a.status === 'done' ? '✓' : '✗'
-      const iconColor = a.status === 'running' ? 'claude' : a.status === 'done' ? 'success' : 'error'
-      const fam = family(a.model)
-      const activity =
-        a.status === 'running' ? (a.currentTool ? `▸ ${a.currentTool}` : 'thinking') : a.status === 'done' ? 'done' : 'failed'
-      const end = a.endedAt ?? Math.max(now, a.startedAt)
-      return (
-        <Box flexDirection="row" justifyContent="space-between" width="100%">
-          <Text wrap="truncate">
-            <Text color={iconColor}>{icon} </Text>
-            <Text bold>{a.type}</Text>
-            {a.description && <Text dimColor>  {a.description}</Text>}
-          </Text>
-          <Text wrap="truncate">
-            <Text color={MODEL_COLORS[fam] ?? 'subtle'}>{fam}</Text>
-            <Text dimColor> · </Text>
-            <Text dimColor={a.status !== 'running'}>{activity}</Text>
-            <Text dimColor>
-              {' · '}
-              {a.tools} tools · {fmtTokens(a.tokens)} tok · {fmtElapsed(end - a.startedAt)}
+    if (shown.length > 0) {
+      const running = shown.filter(a => a.status === 'running').length
+      const finished = shown.length - running
+      const rows = shown.slice(-MAX_ROWS).map(a => {
+        const icon = a.status === 'running' ? frame : a.status === 'done' ? '✓' : '✗'
+        const iconColor = a.status === 'running' ? 'claude' : a.status === 'done' ? 'success' : 'error'
+        const fam = family(a.model)
+        const activity =
+          a.status === 'running' ? (a.currentTool ? `▸ ${a.currentTool}` : 'thinking') : a.status === 'done' ? 'done' : 'failed'
+        const end = a.endedAt ?? Math.max(now, a.startedAt)
+        return (
+          <Box flexDirection="row" justifyContent="space-between" width="100%">
+            <Text wrap="truncate">
+              <Text color={iconColor}>{icon} </Text>
+              <Text bold>{a.type}</Text>
+              {a.description && <Text dimColor>  {a.description}</Text>}
             </Text>
-          </Text>
-        </Box>
+            <Text wrap="truncate">
+              <Text color={MODEL_COLORS[fam] ?? 'subtle'}>{fam}</Text>
+              <Text dimColor> · </Text>
+              <Text dimColor={a.status !== 'running'}>{activity}</Text>
+              <Text dimColor>
+                {' · '}
+                {a.tools} tools · {fmtTokens(a.tokens)} tok · {fmtElapsed(end - a.startedAt)}
+              </Text>
+            </Text>
+          </Box>
+        )
+      })
+      sections.push(
+        <Text wrap="truncate">
+          <Text dimColor>Subagents  </Text>
+          <Text color="claude">{running} running</Text>
+          {finished > 0 && <Text dimColor> · {finished} finished</Text>}
+          {shown.length > MAX_ROWS && <Text dimColor> · {shown.length - MAX_ROWS} more not shown</Text>}
+        </Text>,
+        ...rows,
       )
-    })
+    }
 
-    const header = (
-      <Text wrap="truncate">
-        <Text dimColor>Subagents  </Text>
-        <Text color="claude">{running} running</Text>
-        {finished > 0 && <Text dimColor> · {finished} finished</Text>}
-        {shown.length > MAX_ROWS && <Text dimColor> · {shown.length - MAX_ROWS} more not shown</Text>}
-      </Text>
-    )
+    if (sessions.length > 0) {
+      const working = sessions.filter(s => s.isRunning).length
+      const idle = sessions.length - working
+      const rows = sessions.slice(0, MAX_ROWS).map(s => {
+        const fam = family(s.model)
+        return (
+          <Box flexDirection="row" justifyContent="space-between" width="100%">
+            <Text wrap="truncate">
+              <Text color={s.isRunning ? 'claude' : 'subtle'}>{s.isRunning ? frame : '○'} </Text>
+              <Text bold>{s.name}</Text>
+              {s.title && <Text dimColor>  {s.title}</Text>}
+            </Text>
+            <Text wrap="truncate">
+              {s.model && <Text color={MODEL_COLORS[fam] ?? 'subtle'}>{fam}</Text>}
+              {s.model && <Text dimColor> · </Text>}
+              {s.isRunning ? <Text>working</Text> : <Text dimColor>idle {fmtAgo(now - s.lastActivityAt)}</Text>}
+              {s.contextPercent !== undefined && <Text dimColor> · ctx {s.contextPercent}%</Text>}
+            </Text>
+          </Box>
+        )
+      })
+      sections.push(
+        <Text wrap="truncate">
+          <Text dimColor>Sessions  </Text>
+          {working > 0 && <Text color="claude">{working} working</Text>}
+          {working > 0 && idle > 0 && <Text dimColor> · </Text>}
+          {idle > 0 && <Text dimColor>{idle} idle</Text>}
+          {sessions.length > MAX_ROWS && <Text dimColor> · {sessions.length - MAX_ROWS} more not shown</Text>}
+        </Text>,
+        ...rows,
+      )
+    }
 
     // Share the band: these rows on top, then whatever the mods beneath drew
     // (usage-band's row), so neither mod hides the other whichever loads first.
     const below = await next(e)
     return (
       <Box flexDirection="column">
-        {header}
-        {rows}
+        {sections}
         {below && (
           <Text dimColor wrap="truncate">
             {'─'.repeat(400)}

@@ -31,6 +31,14 @@ Percentages turn yellow at 50% and red at 80%. The band refreshes while you are 
 
 The header counts running and finished agents. A finished agent stays visible for 20 seconds, then drops off. Up to 6 rows are shown.
 
+**Linked sessions** (desktop app only). Sessions this one started with `start_session`, and the ones those started, get a block of their own under the subagents:
+
+- spinner while the session is working, `○` when idle
+- its short name and title
+- model, `working` or `idle Nm ago`, and context fill (`ctx 23%`)
+
+The data comes from the desktop app's `ccd_session_mgmt` MCP server (`list_sessions` with `linked: true`, `get_session`, `get_usage`), polled every 5 seconds. Archived sessions, the parent and sibling sessions are left out. In a terminal session that server does not exist: the first call says so and polling stops. Unlike subagents, a session's current tool and token count are not shown, since the server does not report them.
+
 ## flight-recorder
 
 ![flight-recorder pane, text view, showing one turn with the main lane and two subagent lanes](docs/flight-recorder.png)
