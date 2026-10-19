@@ -1,0 +1,6 @@
+{
+  "name": "usage-band",
+  "version": "0.1.0",
+  "description": "One-line band above the prompt: context fill, session cost, 5h and 7d rate limits with reset countdowns, model",
+  "types": "./types/index.d.ts"
+}

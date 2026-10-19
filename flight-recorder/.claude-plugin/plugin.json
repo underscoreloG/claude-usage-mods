@@ -1,0 +1,6 @@
+{
+  "name": "flight-recorder",
+  "version": "0.1.0",
+  "description": "Live pane timeline of each turn: model requests and tool calls per lane (main + subagents), cost, tokens",
+  "types": "./types/index.d.ts"
+}
