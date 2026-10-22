@@ -26,8 +26,21 @@ export type SessionRow = {
   contextPercent?: number
 }
 
+// A background shell (Bash run_in_background, or Ctrl+B) or a Monitor,
+// from the call that started it to the notification that reports its end
+export type TaskRow = {
+  // the engine's task id: Bash's backgroundTaskId, Monitor's taskId
+  id: string
+  kind: 'shell' | 'monitor'
+  // the call's description, else its command
+  label: string
+  status: 'running' | 'completed' | 'failed' | 'killed'
+  startedAt: number
+  endedAt?: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    'agents-band': { agents: AgentRow[]; sessions: SessionRow[]; now: number; isHidden: boolean }
+    'agents-band': { agents: AgentRow[]; sessions: SessionRow[]; tasks: TaskRow[]; now: number; isHidden: boolean }
   }
 }

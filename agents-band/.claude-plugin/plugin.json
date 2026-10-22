@@ -1,6 +1,6 @@
 {
   "name": "agents-band",
   "version": "0.1.0",
-  "description": "Live rows above the prompt for running subagents: type, task, model, current tool, tokens, time. Stacks above usage-band instead of replacing it",
+  "description": "Live rows above the prompt for running subagents (type, task, model, current tool, tokens, time), background shells and monitors, and linked sessions. Stacks above usage-band instead of replacing it",
   "types": "./types/index.d.ts"
 }

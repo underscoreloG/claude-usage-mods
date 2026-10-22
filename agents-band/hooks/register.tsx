@@ -1,11 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentRow, SessionRow } from '../types'
+import type { AgentRow, SessionRow, TaskRow } from '../types'
 import { startSessionPoller } from './sessions'
+import { endFromNotification, startedTaskId } from './tasks'
 
 const agentsAtom = atom({ plugin: 'agents-band', key: 'agents' } as const, [])
 const sessionsAtom = atom({ plugin: 'agents-band', key: 'sessions' } as const, [] as SessionRow[])
+const tasksAtom = atom({ plugin: 'agents-band', key: 'tasks' } as const, [] as TaskRow[])
 const nowAtom = atom({ plugin: 'agents-band', key: 'now' } as const, 0)
 const hiddenAtom = atom({ plugin: 'agents-band', key: 'isHidden' } as const, false)
 
@@ -43,19 +45,41 @@ export function fmtAgo(ms: number): string {
   return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`
 }
 
-export function visible(list: AgentRow[], now: number): AgentRow[] {
+export function visible<T extends { status: string; endedAt?: number }>(list: T[], now: number): T[] {
   return list.filter(a => a.status === 'running' || now - (a.endedAt ?? now) < LINGER_MS)
+}
+
+const TASK_ICONS: Record<TaskRow['status'], [string, string]> = {
+  running: ['', 'claude'],
+  completed: ['✓', 'success'],
+  failed: ['✗', 'error'],
+  killed: ['■', 'subtle'],
 }
 
 function patch($: EngineInterface, id: string, fn: (a: AgentRow) => AgentRow) {
   return update($, agentsAtom, list => list.map(a => (a.id === id ? fn(a) : a)))
 }
 
+// add a row for a call that went to the background; observer only: the call
+// already ran and its result goes back untouched whatever happens here
+async function track($: EngineInterface, tool: 'Bash' | 'Monitor', label: string, result: unknown) {
+  try {
+    const id = startedTaskId(tool, result)
+    if (id === undefined) return
+    const now = await $.clock.now()
+    const row: TaskRow = { id, kind: tool === 'Bash' ? 'shell' : 'monitor', label, status: 'running', startedAt: now }
+    await update($, tasksAtom, list => [...list.filter(t => t.id !== id), row])
+    await update($, nowAtom, () => now)
+  } catch {
+    // keep the call's result
+  }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'agentsband',
-      description: 'Show or hide the subagent and linked-session rows above the prompt',
+      description: 'Show or hide the subagent, background task and linked-session rows above the prompt',
     })
     // live spinner and timers, only while something on screen moves
     $.clock.every(250, () => {
@@ -64,11 +88,14 @@ export const register: Register = on => {
         const list = await read($, agentsAtom)
         const isAgentShown = visible(list, now).length > 0
         if (!isAgentShown && list.length > 0) await update($, agentsAtom, () => [])
+        const tasks = await read($, tasksAtom)
+        const isTaskShown = visible(tasks, now).length > 0
+        if (!isTaskShown && tasks.length > 0) await update($, tasksAtom, () => [])
         const sessions = await read($, sessionsAtom)
         const isSessionRunning = sessions.some(s => s.isRunning)
         // idle sessions only show "Nm ago": a redraw every 30s is enough
         const isAgoStale = sessions.length > 0 && now - (await read($, nowAtom)) >= 30_000
-        if (isAgentShown || isSessionRunning || isAgoStale) await update($, nowAtom, () => now)
+        if (isAgentShown || isTaskShown || isSessionRunning || isAgoStale) await update($, nowAtom, () => now)
       })()
     })
     // sessions this one started, read from the desktop app every few seconds
@@ -78,7 +105,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'agentsband' }, async $ => {
     const hidden = await update($, hiddenAtom, x => !x)
-    return { text: hidden ? 'Subagent and session rows hidden.' : 'Subagent and session rows shown.' }
+    return { text: hidden ? 'Subagent, background and session rows hidden.' : 'Subagent, background and session rows shown.' }
   })
 
   on('turn.start', async ($, e, next) => {
@@ -129,6 +156,46 @@ export const register: Register = on => {
     }
   }).catch(($, e, next) => next(e)) // observer only: fail open, never block a tool
 
+  // background shells and monitors, from any loop: a row from the call that
+  // backgrounded them, closed by TaskStop or by their task notification
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const out = await next(e)
+    if (!out.isError) await track($, 'Bash', e.description || e.command, out.result)
+    return out
+  })
+
+  on('tool.call', { tool: 'Monitor' }, async ($, e, next) => {
+    const out = await next(e)
+    if (!out.isError) await track($, 'Monitor', e.description || (e.command ?? e.ws?.url ?? ''), out.result)
+    return out
+  })
+
+  on('tool.call', { tool: 'TaskStop' }, async ($, e, next) => {
+    const out = await next(e)
+    try {
+      const id = e.task_id ?? e.shell_id
+      const now = await $.clock.now()
+      await update($, tasksAtom, list =>
+        list.map(t => (t.id === id && t.status === 'running' ? { ...t, status: 'killed' as const, endedAt: now } : t)),
+      )
+    } catch {
+      // observer only
+    }
+    return out
+  })
+
+  on('prompt.submit', async ($, e, next) => {
+    if (e.origin.kind !== 'task-notification') return next(e)
+    try {
+      const now = await $.clock.now()
+      await update($, tasksAtom, list => endFromNotification(list, e.text, now))
+      await update($, nowAtom, () => now)
+    } catch {
+      // observer only: never hold up a delivery
+    }
+    return next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) return next(e)
     const now = await $.clock.now()
@@ -142,8 +209,9 @@ export const register: Register = on => {
     if (e.props.hasSurvey || (await read($, hiddenAtom))) return next(e)
     const now = await read($, nowAtom)
     const shown = visible(await read($, agentsAtom), now)
+    const tasks = visible(await read($, tasksAtom), now)
     const sessions = await read($, sessionsAtom)
-    if (shown.length === 0 && sessions.length === 0) return next(e)
+    if (shown.length === 0 && tasks.length === 0 && sessions.length === 0) return next(e)
 
     const { Box, Text } = $.ui.resolve(e)
     const frame = SPINNER[Math.floor(now / 100) % SPINNER.length] ?? '•'
@@ -184,6 +252,38 @@ export const register: Register = on => {
           <Text color="claude">{running} running</Text>
           {finished > 0 && <Text dimColor> · {finished} finished</Text>}
           {shown.length > MAX_ROWS && <Text dimColor> · {shown.length - MAX_ROWS} more not shown</Text>}
+        </Text>,
+        ...rows,
+      )
+    }
+
+    if (tasks.length > 0) {
+      const running = tasks.filter(t => t.status === 'running').length
+      const finished = tasks.length - running
+      const rows = tasks.slice(-MAX_ROWS).map(t => {
+        const [icon, iconColor] = TASK_ICONS[t.status]
+        const end = t.endedAt ?? Math.max(now, t.startedAt)
+        return (
+          <Box flexDirection="row" justifyContent="space-between" width="100%">
+            <Text wrap="truncate">
+              <Text color={iconColor}>{icon || frame} </Text>
+              <Text bold>{t.kind}</Text>
+              {t.label && <Text dimColor>  {t.label}</Text>}
+            </Text>
+            <Text wrap="truncate">
+              <Text dimColor={t.status !== 'running'}>{t.status}</Text>
+              <Text dimColor> · {fmtElapsed(end - t.startedAt)}</Text>
+            </Text>
+          </Box>
+        )
+      })
+      sections.push(
+        <Text wrap="truncate">
+          <Text dimColor>Background  </Text>
+          {running > 0 && <Text color="claude">{running} running</Text>}
+          {running > 0 && finished > 0 && <Text dimColor> · </Text>}
+          {finished > 0 && <Text dimColor>{finished} finished</Text>}
+          {tasks.length > MAX_ROWS && <Text dimColor> · {tasks.length - MAX_ROWS} more not shown</Text>}
         </Text>,
         ...rows,
       )
