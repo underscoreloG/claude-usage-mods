@@ -31,6 +31,14 @@ Percentages turn yellow at 50% and red at 80%. The band refreshes while you are 
 
 The header counts running and finished agents. A finished agent stays visible for 20 seconds, then drops off. Up to 6 rows are shown.
 
+**Background tasks**. Shell commands sent to the background (`run_in_background`, or Ctrl+B) and `Monitor` watches, from the main loop or any subagent, get a block of their own under the subagents:
+
+- spinner while running, `✓` completed, `✗` failed, `■` killed
+- `shell` or `monitor`, then the call's description (or its command)
+- status and elapsed time
+
+A row opens when the call returns a background task id. It closes when that task's notification arrives, or when `TaskStop` stops it, then lingers 20 seconds like a finished subagent. The end is read from the notification text, so a task whose notification never reaches this session stays `running` until the session restarts.
+
 **Linked sessions** (desktop app only). Sessions this one started with `start_session`, and the ones those started, get a block of their own under the subagents:
 
 - spinner while the session is working, `○` when idle
