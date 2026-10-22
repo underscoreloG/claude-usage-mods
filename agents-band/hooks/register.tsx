@@ -79,7 +79,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'agentsband',
-      description: 'Show or hide the subagent and linked-session rows above the prompt',
+      description: 'Show or hide the subagent, background task and linked-session rows above the prompt',
     })
     // live spinner and timers, only while something on screen moves
     $.clock.every(250, () => {
@@ -105,7 +105,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'agentsband' }, async $ => {
     const hidden = await update($, hiddenAtom, x => !x)
-    return { text: hidden ? 'Subagent and session rows hidden.' : 'Subagent and session rows shown.' }
+    return { text: hidden ? 'Subagent, background and session rows hidden.' : 'Subagent, background and session rows shown.' }
   })
 
   on('turn.start', async ($, e, next) => {

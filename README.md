@@ -1,11 +1,11 @@
 # claude-usage-mods
 
-Three Claude Code mods for keeping an eye on usage, cost and subagents while you work.
+Three Claude Code mods for keeping an eye on usage, cost, subagents and background tasks while you work.
 
 | Mod | What it does | Toggle |
 |---|---|---|
 | `usage-band` | One-line band above the prompt: context fill, session cost, rate limits, model | `/usageband` |
-| `agents-band` | Live rows for running subagents, stacked above the usage band | `/agentsband` |
+| `agents-band` | Live rows for subagents, background shells and monitors, and linked sessions, stacked above the usage band | `/agentsband` |
 | `flight-recorder` | Pane with a live timeline of each turn, per lane (main + subagents) | `/flight-recorder` |
 
 ## usage-band and agents-band
@@ -22,7 +22,7 @@ Three Claude Code mods for keeping an eye on usage, cost and subagents while you
 
 Percentages turn yellow at 50% and red at 80%. The band refreshes while you are idle, so the countdowns stay accurate, and it steps aside when a survey or question takes that spot.
 
-**agents-band** is the top block. It appears only while subagents exist, so it costs no space the rest of the time. Each row shows one subagent:
+**agents-band** is the top block. It appears only while there is something to show (subagents, background tasks or linked sessions), so it costs no space the rest of the time. Each subagent row shows:
 
 - spinner while running, `✓` when done, `✗` when failed
 - agent type and the task it was given
