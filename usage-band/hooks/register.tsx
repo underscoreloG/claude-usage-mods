@@ -118,13 +118,17 @@ export const register: Register = on => {
     const model = await read($, modelAtom)
     const now = await read($, nowAtom)
     const { Box, Text, Button } = $.ui.resolve(e)
-    // the Flight recorder button shows only while that mod is loaded
+    // the Flight recorder and Switchboard buttons show only while those mods are loaded
     let hasFlight = false
+    let hasSwitchboard = false
     try {
-      hasFlight = (await $.command.list()).some(c => c.name === 'flight-recorder')
+      const commands = await $.command.list()
+      hasFlight = commands.some(c => c.name === 'flight-recorder')
+      hasSwitchboard = commands.some(c => c.name === 'switchboard')
     } catch {
-      // no command list: leave the button out
+      // no command list: leave the buttons out
     }
+    const hasButtons = hasFlight || hasSwitchboard
     const pct = usage.percent ?? 0
 
     // each group is two lines: a dim label on top, the value under it
@@ -186,20 +190,35 @@ export const register: Register = on => {
             <Box paddingLeft={i > 0 ? 1 : 0}>{g}</Box>
           </Box>
         ))}
-        {hasFlight && separator}
-        {hasFlight && (
-          <Box alignItems="center" paddingLeft={1}>
-            <Button
-              key="flight-recorder"
-              label="✈"
-              onPress={async () => {
-                try {
-                  await $.command.run({ command: 'flight-recorder' })
-                } catch {
-                  $.ui.toast('The flight-recorder mod is not loaded.')
-                }
-              }}
-            />
+        {hasButtons && separator}
+        {hasButtons && (
+          <Box flexDirection="column" alignItems="center" paddingLeft={1}>
+            {hasFlight && (
+              <Button
+                key="flight-recorder"
+                label="✈"
+                onPress={async () => {
+                  try {
+                    await $.command.run({ command: 'flight-recorder' })
+                  } catch {
+                    $.ui.toast('The flight-recorder mod is not loaded.')
+                  }
+                }}
+              />
+            )}
+            {/* Switchboard's ui.press hook opens its panel and takes the press;
+                this closure runs only when that hook did not. */}
+            {/* The emoji gear draws at the plane's size; the bare ⚙ draws smaller.
+                The terminal has no row to spare for a gap. */}
+            {hasSwitchboard && (
+              <Box marginTop={e.surface === 'terminal' ? 0 : 1}>
+                <Button
+                  key="switchboard"
+                  label={'⚙️'}
+                  onPress={() => $.ui.toast('Switchboard did not answer: run /switchboard.')}
+                />
+              </Box>
+            )}
           </Box>
         )}
       </Box>

@@ -1,12 +1,13 @@
 # claude-usage-mods
 
-Three Claude Code mods for keeping an eye on usage, cost, subagents and background tasks while you work.
+Four Claude Code mods for keeping an eye on usage, cost, subagents and background tasks while you work, and for switching what is loaded on or off.
 
 | Mod | What it does | Toggle |
 |---|---|---|
 | `usage-band` | One-line band above the prompt: context fill, session cost, rate limits, model | `/usageband` |
 | `agents-band` | Live rows for subagents, background shells and monitors, and linked sessions, stacked above the usage band | `/agentsband` |
 | `flight-recorder` | Pane with a live timeline of each turn, per lane (main + subagents) | `/flight-recorder` |
+| `switchboard` | Pane with on/off switches for mods, plugins, skills and MCP servers | `/switchboard` |
 
 ## usage-band and agents-band
 
@@ -19,6 +20,7 @@ Three Claude Code mods for keeping an eye on usage, cost, subagents and backgrou
 - **5h limit / 7d limit** - percent used of each rate limit, with a countdown to its reset.
 - **Model** - the model the main loop is running.
 - **✈ button** - opens the flight recorder pane, shown only when `flight-recorder` is loaded.
+- **⚙️ button** - under the plane, opens the Switchboard pane without adding a command to the transcript, shown only when `switchboard` is loaded.
 
 Percentages turn yellow at 50% and red at 80%. The band refreshes while you are idle, so the countdowns stay accurate, and it steps aside when a survey or question takes that spot.
 
@@ -62,6 +64,23 @@ In the screenshot, main (opus) used 92% of the tokens for the turn and the two s
 
 Two views: **Text** (default, works in the terminal too) and **Dashboard** (SVG charts: cost per turn, tokens by model, top tools; desktop only). `/flight-recorder text` or `/flight-recorder dashboard` opens the pane on that view. Earlier turns are kept below the current one.
 
+## switchboard
+
+A side pane with an on/off switch for everything loaded into a session, in four tabs (`1`-`4` to switch):
+
+| Tab | Lists | Off means | Takes effect |
+|---|---|---|---|
+| **Mods** | Mods loaded from `CLAUDE_CODE_PLUGIN_DIRS` and the session's dev-mods folder | Its `hooks/hooks.json` is backed up and pointed at a no-op stub; on restores it | Next session (dev-mods: at once) |
+| **Plugins** | Installed marketplace plugins | `claude plugin disable` (on: `enable`) | Next session |
+| **Skills** | Your skills, project skills, and each enabled plugin's | `Skill(<name>)` is added to `permissions.deny` in `~/.claude/settings.json` | Next session |
+| **MCP** | MCP servers whose tools Claude can call, grouped by server | Switchboard refuses every call to that server and marks its tools as switched off | At once |
+
+- Mods that open panels also get an eye button: hiding blocks their panes without switching them off.
+- The first time it edits `~/.claude/settings.json` it keeps the original as `settings.json.switchboard-backup`.
+- A blocked skill stays in Claude's list; calls to it are refused. A switched-off MCP server's tools are still listed, marked off.
+- On desktop the switches are drawn as SVG pills; the terminal gets `━━● ON` / `○── OFF`.
+- `/switchboard on|off|hide|show <mod>` does the same from the prompt.
+
 ## Install
 
 1. Clone the repo anywhere, for example `~/.claude/mods`.
@@ -70,7 +89,7 @@ Two views: **Text** (default, works in the terminal too) and **Dashboard** (SVG 
 ```json
 {
   "env": {
-    "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/usage-band:/path/to/agents-band:/path/to/flight-recorder"
+    "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/usage-band:/path/to/agents-band:/path/to/flight-recorder:/path/to/switchboard"
   }
 }
 ```

@@ -101,3 +101,24 @@ test('no Flight recorder button when that mod is not loaded', async ($, on) => {
   const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   expect(await ui.find({ type: 'Button' })).toBeUndefined()
 })
+
+test('Switchboard button sits under the plane, and only while Switchboard is loaded', async ($, on) => {
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('command.list', () => ({
+    value: [
+      { name: 'flight-recorder', description: 'Open the flight recorder pane' },
+      { name: 'switchboard', description: 'Switchboard' },
+    ] as never,
+  }))
+  on('ui.render', { component: 'AbovePrompt' }, ($$, e) => {
+    const { Text } = $$.ui.resolve(e)
+    return <Text>beneath</Text>
+  })
+  await $.session.measure({ context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], changed: ['context'] })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
+    expect(await ui.find({ type: 'Button', key: 'flight-recorder' })).toBeDefined()
+    expect((await ui.find({ type: 'Button', key: 'switchboard' }))?.props.label).toBe('⚙\uFE0F')
+    await ui.unmount()
+  }
+})
