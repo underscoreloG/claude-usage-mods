@@ -1,0 +1,6 @@
+{
+  "name": "switchboard",
+  "version": "0.1.0",
+  "description": "/switchboard opens one panel to switch mods, plugins, skills and MCP servers on or off",
+  "types": "./types/index.d.ts"
+}
