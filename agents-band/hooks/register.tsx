@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { AgentRow, SessionRow, TaskRow } from '../types'
 import { startSessionPoller } from './sessions'
-import { endFromNotification, startedTaskId } from './tasks'
+import { endFromNotification, notificationText, startedTaskId } from './tasks'
 
 const agentsAtom = atom({ plugin: 'agents-band', key: 'agents' } as const, [])
 const sessionsAtom = atom({ plugin: 'agents-band', key: 'sessions' } as const, [] as SessionRow[])
@@ -184,16 +184,21 @@ export const register: Register = on => {
     return out
   })
 
-  on('prompt.submit', async ($, e, next) => {
-    if (e.origin.kind !== 'task-notification') return next(e)
+  // a notification row in any loop: a subagent's background task reports into
+  // that subagent's conversation, never through the main loop's prompt
+  on('session.append', async ($, e, next) => {
+    const out = await next(e)
     try {
-      const now = await $.clock.now()
-      await update($, tasksAtom, list => endFromNotification(list, e.text, now))
-      await update($, nowAtom, () => now)
+      const text = notificationText(e)
+      if (text !== undefined) {
+        const now = await $.clock.now()
+        await update($, tasksAtom, list => endFromNotification(list, text, now))
+        await update($, nowAtom, () => now)
+      }
     } catch {
-      // observer only: never hold up a delivery
+      // observer only: the row is stored whatever happens here
     }
-    return next(e)
+    return out
   })
 
   on('turn.complete', async ($, e, next) => {
