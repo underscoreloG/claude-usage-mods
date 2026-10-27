@@ -4,7 +4,7 @@ Five Claude Code mods for keeping an eye on usage, cost, subagents and backgroun
 
 | Mod | What it does | Toggle |
 |---|---|---|
-| `usage-band` | One-line band above the prompt: context fill, session cost, rate limits, model | `/usageband` |
+| `usage-band` | One-line band above the prompt: context fill, API cost, rate limits, model, buttons for the panes | `/usageband` |
 | `agents-band` | Live rows for subagents, background shells and monitors, and linked sessions, stacked above the usage band | `/agentsband` |
 | `flight-recorder` | Pane with a live timeline of each turn, per lane (main + subagents) | `/flight-recorder` |
 | `switchboard` | Pane with on/off switches for mods, plugins, skills and MCP servers | `/switchboard` |
@@ -17,11 +17,15 @@ Five Claude Code mods for keeping an eye on usage, cost, subagents and backgroun
 **usage-band** is the bottom row. It answers "how much room and budget do I have left?" without running `/usage` or `/context`:
 
 - **Context** - how full the context window is (percent, bar, tokens used / window size).
-- **Session cost** - what this session has cost so far.
-- **5h limit / 7d limit** - percent used of each rate limit, with a countdown to its reset.
+- **API cost** - what this session has cost so far, at API prices.
+- **5h limit / 7d limit** - percent used of each rate limit, with a countdown to its reset (`↻ 2h11m`).
 - **Model** - the model the main loop is running.
-- **✈ button** - opens the flight recorder pane, shown only when `flight-recorder` is loaded.
-- **⚙️ button** - under the plane, opens the Switchboard pane without adding a command to the transcript, shown only when `switchboard` is loaded.
+- **Buttons** - two per line, so three fit the band's two lines. Each shows only while its mod is loaded:
+  - **flight** (✈) opens the flight recorder pane.
+  - **switchboard** (⚙️) opens the Switchboard pane without adding a command to the transcript.
+  - **hud** (a gauge on desktop, `◆` in the terminal) opens the `session-hud` pane.
+
+On desktop the buttons are 16 px grey icons; the terminal draws them as glyphs. To hide one you don't use, `/usageband hide <button>` (`flight`, `switchboard` or `hud`); `/usageband show <button>` brings it back, and `/usageband buttons` lists them with on/off. What you hide stays hidden in new sessions. `/usageband` alone hides or shows the whole band.
 
 Percentages turn yellow at 50% and red at 80%. The band refreshes while you are idle, so the countdowns stay accurate, and it steps aside when a survey or question takes that spot.
 
