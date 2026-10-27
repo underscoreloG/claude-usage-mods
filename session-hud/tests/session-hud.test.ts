@@ -50,6 +50,9 @@ test('the pane shows context, turns, tools, files and what runs now, on every su
     expect(await ui.find({ type: 'Text', text: /3 calls/ })).toBeTruthy()
     // The running command shows with the key hidden and the project path trimmed
     expect((await ui.find({ type: 'Text', text: /▶/ }))?.text).toBe('▶ Bash: curl -H "x-api-key: [ANTHROPIC KEY]" x')
+    // CONTEXT and COST each fill their half's height off the terminal, so they're always equal
+    const grown = (await ui.findAll({ type: 'Box' })).filter(box => box.props.borderStyle === 'round' && box.props.flexGrow === 1)
+    expect(grown).toHaveLength(surface === 'terminal' ? 0 : 2)
     // one turn draws one 12px bar at its own size, not scaled up to the card
     if (surface === 'desktop' || surface === 'mobile') {
       const turns = (await ui.findAll({ type: 'Svg' })).find(svg => svg.props.alt === '1 turns')

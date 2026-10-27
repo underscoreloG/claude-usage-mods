@@ -153,9 +153,10 @@ export const register: Register = (on) => {
       const row = Array.from({ length: width }, (_, i) => ['▆', i < filled ? shade(color, i / width) : C.track] as [string, number])
       return Raster({ key, columns: width, rows: 1, cells: cells(row) })
     }
-    const card = (title: string, width: number | undefined, children: RenderChildren[], right?: RenderChildren) =>
+    const card = (title: string, width: number | undefined, children: RenderChildren[], right?: RenderChildren, grow?: boolean) =>
       Box({
         width,
+        ...(grow ? { flexGrow: 1 } : {}),
         flexDirection: 'column',
         borderStyle: 'round',
         borderColor: hex(C.border),
@@ -191,14 +192,15 @@ export const register: Register = (on) => {
       flexWrap: Raster ? 'nowrap' : 'wrap',
       gap: 1,
       children: [
+        // Off the terminal each card fills its half's height, so the two are always as tall as each other
         pair(card('CONTEXT', Raster ? half : undefined, [
           Text({ children: [Text({ color: hex(ctxColor), bold: true, children: [Math.round(ctx * 100) + '%'] }), Text({ color: hex(C.dim), children: ['  ' + tokens + 'k of ' + Math.round(usage.context.window / 1000) + 'k'] })] }),
           meter('ctx', ctx, inner(half), ctxColor),
-        ])),
+        ], undefined, !Raster)),
         pair(card('COST', Raster ? half : undefined, [
           Text({ children: [Text({ color: hex(C.amber), bold: true, children: ['$' + cost.toFixed(2)] }), Text({ color: hex(C.dim), children: ['  this session'] })] }),
           Text({ color: hex(C.dim), children: [lastTurn === undefined ? 'no turn yet' : '$' + lastTurn.toFixed(3) + '  last turn'] }),
-        ])),
+        ], undefined, !Raster)),
       ],
     })
 
