@@ -10,6 +10,6 @@ export type Snapshot = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'usage-band': { usage: Snapshot | null; model: string | null; now: number; isHidden: boolean; hiddenButtons: string[] }
+    'usage-band': { usage: Snapshot | null; model: string | null; now: number; isHidden: boolean; shownButtons: string[]; cache: { read: number; total: number } }
   }
 }

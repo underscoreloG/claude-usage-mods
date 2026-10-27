@@ -7,11 +7,14 @@ const usageAtom = atom({ plugin: 'usage-band', key: 'usage' } as const, null)
 const modelAtom = atom({ plugin: 'usage-band', key: 'model' } as const, null)
 const nowAtom = atom({ plugin: 'usage-band', key: 'now' } as const, 0)
 const hiddenAtom = atom({ plugin: 'usage-band', key: 'isHidden' } as const, false)
-const hiddenButtonsAtom = atom({ plugin: 'usage-band', key: 'hiddenButtons' } as const, [])
+// input tokens this session, and how many of them the prompt cache served
+const cacheAtom = atom({ plugin: 'usage-band', key: 'cache' } as const, { read: 0, total: 0 })
+// the buttons you turned on: none by default, kept across sessions
+const shownButtonsAtom = atom({ plugin: 'usage-band', key: 'shownButtons' } as const, [])
 
-// The band's buttons by the name /usageband hide|show takes, with the command each opens
+// The band's buttons by the name /usageband <button> takes, with the command each opens
 const BUTTONS = [
-  { name: 'flight', command: 'flight-recorder' },
+  { name: 'flight-recorder', command: 'flight-recorder' },
   { name: 'switchboard', command: 'switchboard' },
   { name: 'hud', command: 'hud' },
 ] as const
@@ -72,6 +75,18 @@ export function untilReset(resetsAt: string | undefined, now: number): string | 
   return `${m}m`
 }
 
+// The share of input the cache served, in percent; undefined before the first response
+export function cacheHit(read: number, total: number): number | undefined {
+  return total > 0 ? Math.round((read / total) * 100) : undefined
+}
+
+// A cache hit rate is good when high: green from 80%, amber from 50%, red below
+export function hitLevel(pct: number): 'success' | 'warning' | 'error' {
+  if (pct >= 80) return 'success'
+  if (pct >= 50) return 'warning'
+  return 'error'
+}
+
 export function level(pct: number): 'success' | 'warning' | 'error' {
   if (pct >= 80) return 'error'
   if (pct >= 50) return 'warning'
@@ -98,13 +113,12 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'usageband',
-      description: 'Show or hide the usage band above the prompt; buttons, hide or show a button',
-      argumentHint: '[buttons | hide <button> | show <button>]',
+      description: 'Show or hide the usage band; with a button name, turn that button on or off',
+      argumentHint: '[flight-recorder | switchboard | hud | buttons]',
     })
-    // which buttons you hid, kept across sessions
-    const saved = await $.store.get('hiddenButtons')
+    const saved = await $.store.get('shownButtons')
     if (Array.isArray(saved)) {
-      await update($, hiddenButtonsAtom, () => saved.filter((n): n is string => typeof n === 'string'))
+      await update($, shownButtonsAtom, () => saved.filter((n): n is string => typeof n === 'string'))
     }
     await refresh($)
     const now = await $.clock.now()
@@ -120,14 +134,14 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'usageband' }, async ($, e) => {
-    const [verb, name] = e.args.trim().split(/\s+/)
+    const verb = e.args.trim()
     if (!verb) {
       const hidden = await update($, hiddenAtom, h => !h)
       return { text: hidden ? 'Usage band hidden.' : 'Usage band shown.' }
     }
     const names = BUTTONS.map(b => b.name).join(', ')
     if (verb === 'buttons') {
-      const hiddenButtons = await read($, hiddenButtonsAtom)
+      const shownButtons = await read($, shownButtonsAtom)
       let loaded: string[] = []
       try {
         loaded = (await $.command.list()).map(c => c.name)
@@ -135,18 +149,19 @@ export const register: Register = on => {
         // no command list: say nothing about which mods are loaded
       }
       const rows = BUTTONS.map(
-        b => `${b.name}: ${hiddenButtons.includes(b.name) ? 'off' : 'on'}${loaded.includes(b.command) ? '' : ' (mod not loaded)'}`,
+        b => `${b.name}: ${shownButtons.includes(b.name) ? 'on' : 'off'}${loaded.includes(b.command) ? '' : ' (mod not loaded)'}`,
       )
-      return { text: `Usage band buttons\n${rows.join('\n')}\nHide or show one with /usageband hide <button> or /usageband show <button>.` }
+      return { text: `Usage band buttons\n${rows.join('\n')}\nTurn one on or off with /usageband <button>.` }
     }
-    if ((verb === 'hide' || verb === 'show') && BUTTONS.some(b => b.name === name)) {
-      const hiddenButtons = await update($, hiddenButtonsAtom, list =>
-        verb === 'hide' ? [...list.filter(n => n !== name), name as string] : list.filter(n => n !== name),
+    // a button's name turns it on when off, off when on
+    if (BUTTONS.some(b => b.name === verb)) {
+      const shownButtons = await update($, shownButtonsAtom, list =>
+        list.includes(verb) ? list.filter(n => n !== verb) : [...list, verb],
       )
-      await $.store.set('hiddenButtons', hiddenButtons)
-      return { text: `The ${name} button is ${verb === 'hide' ? 'hidden' : 'shown'}. It stays that way in new sessions.` }
+      await $.store.set('shownButtons', shownButtons)
+      return { text: `The ${verb} button is ${shownButtons.includes(verb) ? 'on' : 'off'}. It stays that way in new sessions.` }
     }
-    return { text: `Use /usageband, /usageband buttons, or /usageband hide|show <button> (${names}).` }
+    return { text: `Use /usageband, /usageband buttons, or /usageband <button> (${names}).` }
   })
 
   on('session.measure', async ($, e, next) => {
@@ -158,6 +173,14 @@ export const register: Register = on => {
   // cost and limits move while subagents are still working.
   on('turn.step', async function* ($, e, next) {
     const result = yield* next(e)
+    // every response counts toward the cache hit rate, subagents' too: they are billed alike
+    const u = result.usage
+    if (u) {
+      await update($, cacheAtom, c => ({
+        read: c.read + u.cache_read_input_tokens,
+        total: c.total + u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens,
+      }))
+    }
     if (e.agentId === undefined) {
       const model = result.usage?.model ?? e.model
       if ((await read($, modelAtom)) !== model) await update($, modelAtom, () => model)
@@ -180,10 +203,10 @@ export const register: Register = on => {
     let hasHud = false
     try {
       const commands = await $.command.list()
-      // a button shows while its mod is loaded, unless you hid it with /usageband hide
-      const hiddenButtons = await read($, hiddenButtonsAtom)
-      const shows = (name: string, command: string) => !hiddenButtons.includes(name) && commands.some(c => c.name === command)
-      hasFlight = shows('flight', 'flight-recorder')
+      // a button shows once you turned it on with /usageband show, and only while its mod is loaded
+      const shownButtons = await read($, shownButtonsAtom)
+      const shows = (name: string, command: string) => shownButtons.includes(name) && commands.some(c => c.name === command)
+      hasFlight = shows('flight-recorder', 'flight-recorder')
       hasSwitchboard = shows('switchboard', 'switchboard')
       hasHud = shows('hud', 'hud')
     } catch {
@@ -191,52 +214,68 @@ export const register: Register = on => {
     }
     const pct = usage.percent ?? 0
 
-    // each group is two lines: a dim label on top, the value under it
-    const group = (label: string, value: RenderElement) => (
-      <Box flexDirection="column">
-        <Text dimColor wrap="truncate">
-          {label}
-        </Text>
-        <Text wrap="truncate">{value}</Text>
-      </Box>
-    )
-    const groups = [
+    // One line: each group is its value alone, the limits led by "5h" or "7d" in their colour
+    const group = (value: RenderElement) => <Text wrap="truncate">{value}</Text>
+    // In order: model, context, 5h and 7d limits, cache hit, cost
+    const groups: RenderElement[] = []
+    if (model) groups.push(group(<Text color="claude">{shortModel(model)}</Text>))
+    groups.push(
       group(
-        'Context',
         <Text>
-          <Text color={level(pct)} bold>
-            {pct}%{' '}
-          </Text>
           <Text color={level(pct)}>{bar(pct, 8)[0]}</Text>
           <Text dimColor>{bar(pct, 8)[1]}</Text>
+          <Text color={level(pct)} bold>
+            {' '}
+            {pct}%
+          </Text>
           <Text dimColor>
             {' '}
             {fmtTokens(usage.tokens ?? 0)}/{fmtTokens(usage.window)}
           </Text>
         </Text>,
       ),
-    ]
-    if (usage.cost !== undefined) {
-      groups.push(group('API cost', <Text bold>${usage.cost.toFixed(2)}</Text>))
-    }
+    )
     for (const l of usage.limits) {
       const reset = untilReset(l.resetsAt, now)
       groups.push(
         group(
-          `${limitName(l.kind)} limit`,
           <Text>
+            <Text color={level(l.percentUsed)}>{limitName(l.kind)} </Text>
             <Text color={level(l.percentUsed)} bold>
               {l.percentUsed}%
             </Text>
-            {/* "↻ 2h11m" rather than "resets 2h 11m": short enough not to wrap beside the buttons */}
+            {/* "↻ 2h11m" rather than "resets 2h 11m": short enough to keep the band on one line */}
             {reset && <Text dimColor> ↻ {reset}</Text>}
           </Text>,
         ),
       )
     }
-    if (model) groups.push(group('Model', <Text color="claude">{shortModel(model)}</Text>))
+    const cache = await read($, cacheAtom)
+    const hit = cacheHit(cache.read, cache.total)
+    if (hit !== undefined) {
+      groups.push(
+        group(
+          <Text color={hitLevel(hit)}>
+            <Text bold>{hit}%</Text>
+            <Text> hit</Text>
+          </Text>,
+        ),
+      )
+    }
+    if (usage.cost !== undefined) {
+      groups.push(
+        group(
+          <Text>
+            <Text>💰 </Text>
+            <Text color="warning" bold>
+              ${usage.cost.toFixed(2)}
+            </Text>
+          </Text>,
+        ),
+      )
+    }
 
-    // Up to two buttons per line, so three still fit the band's two lines. Off the terminal each
+    // The buttons sit in a row at the end of the line. Off the terminal each
     // is an icon drawn at a set size, pressed through a plain Button laid over it (as Switchboard
     // draws its switches): a Button's own size is the surface's to choose.
     const terminal = e.surface === 'terminal'
@@ -291,35 +330,21 @@ export const register: Register = on => {
         }),
       )
     }
-    const grid: RenderElement[][] = []
-    for (let i = 0; i < buttons.length; i += 2) grid.push(buttons.slice(i, i + 2))
 
-    const separator = (
-      <Box flexDirection="column">
-        <Text dimColor>│</Text>
-        <Text dimColor>│</Text>
-      </Box>
-    )
-    // Each cell grows to share the width; inside it the separator comes first and the
-    // group sits right after it, so every group is left-aligned like Context.
+    const separator = <Text dimColor>│</Text>
+    // Sections and separators alternate in one row spread with equal gaps, so each separator
+    // sits midway between its neighbours: the first section at the left edge, the last at the right
+    const sections: RenderElement[] = [...groups]
+    if (buttons.length > 0) {
+      sections.push(
+        <Box flexDirection="row" alignItems="center" gap={1}>
+          {buttons}
+        </Box>,
+      )
+    }
     const row = (
-      <Box flexDirection="row" width="100%">
-        {groups.map((g, i) => (
-          <Box flexDirection="row" flexGrow={1}>
-            {i > 0 && separator}
-            <Box paddingLeft={i > 0 ? 1 : 0}>{g}</Box>
-          </Box>
-        ))}
-        {buttons.length > 0 && separator}
-        {buttons.length > 0 && (
-          <Box flexDirection="column" gap={terminal ? 0 : 1} paddingLeft={1}>
-            {grid.map(pair => (
-              <Box flexDirection="row" gap={1}>
-                {pair}
-              </Box>
-            ))}
-          </Box>
-        )}
+      <Box flexDirection="row" alignItems="center" justifyContent="space-between" width="100%">
+        {sections.flatMap((section, i) => (i > 0 ? [separator, section] : [section]))}
       </Box>
     )
 

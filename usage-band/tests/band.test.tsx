@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { untilReset } from '../hooks/register'
+import { cacheHit, hitLevel, untilReset } from '../hooks/register'
 
 const PROPS = {
   hasSurvey: false,
@@ -11,43 +11,70 @@ const PROPS = {
   view: {},
 }
 
-test('band shows context, cost, limits with reset countdown', async ($, on) => {
+const ALL_THREE = [
+  { name: 'flight-recorder', description: 'Open the flight recorder pane' },
+  { name: 'switchboard', description: 'Switchboard' },
+  { name: 'hud', description: 'Open the session dashboard' },
+] as never
+
+// What every band test needs beneath the mod: a measure, a command list, and a band drawn below
+function beneath(on, commands = ALL_THREE) {
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('command.list', () => ({ value: commands }))
+  on('ui.render', { component: 'AbovePrompt' }, ($$, e) => {
+    const { Text } = $$.ui.resolve(e)
+    return <Text>beneath</Text>
+  })
+}
+
+const measure = $ => $.session.measure({ context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], changed: ['context'] })
+// /usageband <button> turns that button on when off, off when on
+const toggle = ($, button: string) => $.command.run({ command: 'usageband', args: button })
+
+test('band is one line: model, context, limits, cache hit, cost, in that order, with separators and no labels', async ($, on) => {
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   // stands in for agents-band, the mod beneath
   on('ui.render', { component: 'AbovePrompt' }, ($$, e) => {
     const { Text } = $$.ui.resolve(e)
     return <Text>AGENT ROWS</Text>
   })
-  const clock = mock.clock(on)
-  const now = clock.now()
   await $.session.measure({
     context: { tokens: 99_600, window: 1_000_000, percent: 10 },
     rateLimits: [
-      { kind: 'five_hour', percentUsed: 1, resetsAt: new Date(now + (2 * 60 + 11) * 60_000).toISOString() },
+      { kind: 'five_hour', percentUsed: 1 },
       { kind: 'seven_day', percentUsed: 83 },
     ],
     cost: { usd: 0.44 },
     changed: ['context', 'rateLimits', 'cost'],
   })
-
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
-    // two lines per group: label, then value
     const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
     const at = (s: string) => texts.indexOf(s)
-    expect(at('Context')).toBeGreaterThan(-1)
-    expect(texts[at('Context') + 1]).toMatch(/^10% .* 99\.6k\/1M$/)
-    expect(texts[at('API cost') + 1]).toBe('$0.44')
-    // the context bar: filled and track are the same box, the track dimmed
-    expect(texts).toContain('▰')
-    expect(texts).toContain('▰▰▰▰▰▰▰')
-    expect(texts.some(t => t.includes('▱'))).toBe(false)
-    expect(texts[at('5h limit') + 1]).toMatch(/^1%/)
-    expect(texts[at('7d limit') + 1]).toBe('83%')
-    expect(texts.filter(t => t === '│')).toHaveLength(6)
+    // no label row
+    for (const label of ['Context', 'API cost', '5h limit', '7d limit', 'Model']) expect(at(label)).toBe(-1)
+    // values in order: context (bar first), 5h, 7d, then cost; model and cache hit need a response first
+    const ctx = texts.findIndex(t => /^▰{8} 10% 99\.6k\/1M$/.test(t))
+    const cost = at('$0.44')
+    // the cost is led by a money bag
+    expect(texts[cost - 1]).toBe('💰 ')
+    // colours: gold cost, limit labels in their limit's colour (1% is green, 83% red)
+    const colorOf = async (text: string) => (await ui.findAll({ type: 'Text', text })).map(t => t.props.color).filter(Boolean)
+    expect(await colorOf('$0.44')).toEqual(['warning'])
+    expect(await colorOf('5h ')).toEqual(['success'])
+    expect(await colorOf('7d ')).toEqual(['error'])
+    const five = texts.findIndex(t => /^5h 1%/.test(t))
+    const seven = texts.findIndex(t => /^7d 83%/.test(t))
+    expect(ctx).toBeGreaterThan(-1)
+    expect(ctx < five && five < seven && seven < cost).toBe(true)
+    // a one-line separator between each section
+    expect(texts.filter(t => t === '│')).toHaveLength(3)
+    // spread with equal gaps: sections and separators alternate in one space-between row
+    const row = (await ui.findAll({ type: 'Box' })).find(box => box.props.justifyContent === 'space-between')
+    expect(row?.children.map(c => (c.type === 'Text' && c.props.wrap === undefined ? '│' : 'section'))).toEqual(['section', '│', 'section', '│', 'section', '│', 'section'])
     // shares the band: the mod beneath is drawn first, this row under it
     expect(at('AGENT ROWS')).toBeGreaterThan(-1)
-    expect(at('AGENT ROWS')).toBeLessThan(at('Context'))
+    expect(at('AGENT ROWS')).toBeLessThan(ctx)
     await ui.unmount()
   }
 })
@@ -74,19 +101,28 @@ test('band yields to a survey', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: 'survey' })).toBeDefined()
 })
 
-test('Flight recorder button opens the pane through its command', async ($, on) => {
+test('no buttons by default, even with every mod loaded', async ($, on) => {
+  mock.store(on)
+  beneath(on)
+  await measure($)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
+    expect(await ui.find({ type: 'Button' })).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+test('Flight recorder button, once shown, opens the pane through its command', async ($, on) => {
   const ran: string[] = []
-  on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('command.list', () => ({ value: [{ name: 'flight-recorder', description: 'Open the flight recorder pane' }] as never }))
+  mock.store(on)
+  beneath(on)
   on('command.run', (_$, e) => {
     ran.push(e.command)
     return { text: 'opened' }
   })
-  on('ui.render', { component: 'AbovePrompt' }, ($$, e) => {
-    const { Text } = $$.ui.resolve(e)
-    return <Text>beneath</Text>
-  })
-  await $.session.measure({ context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], changed: ['context'] })
+  await measure($)
+  await toggle($, 'flight-recorder')
+  ran.length = 0
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
     expect(await ui.find({ type: 'Button', key: 'flight-recorder' })).toBeDefined()
@@ -96,72 +132,42 @@ test('Flight recorder button opens the pane through its command', async ($, on) 
   expect(ran).toEqual(['flight-recorder', 'flight-recorder'])
 })
 
-test('no Flight recorder button when that mod is not loaded', async ($, on) => {
-  on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('command.list', () => ({ value: [] }))
-  on('ui.render', { component: 'AbovePrompt' }, ($$, e) => {
-    const { Text } = $$.ui.resolve(e)
-    return <Text>beneath</Text>
-  })
-  await $.session.measure({ context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], changed: ['context'] })
+test('a shown button stays out while its mod is not loaded', async ($, on) => {
+  mock.store(on)
+  beneath(on, [] as never)
+  await measure($)
+  await toggle($, 'flight-recorder')
   const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   expect(await ui.find({ type: 'Button' })).toBeUndefined()
 })
 
-test('Switchboard button sits beside the plane, and only while Switchboard is loaded', async ($, on) => {
-  on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('command.list', () => ({
-    value: [
-      { name: 'flight-recorder', description: 'Open the flight recorder pane' },
-      { name: 'switchboard', description: 'Switchboard' },
-    ] as never,
-  }))
-  on('ui.render', { component: 'AbovePrompt' }, ($$, e) => {
-    const { Text } = $$.ui.resolve(e)
-    return <Text>beneath</Text>
-  })
-  await $.session.measure({ context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], changed: ['context'] })
-  for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
-    expect(await ui.find({ type: 'Button', key: 'flight-recorder' })).toBeDefined()
-    // the terminal shows the emoji gear; elsewhere the gear is an icon named by its alt
-    if (surface === 'terminal') expect((await ui.find({ type: 'Button', key: 'switchboard' }))?.props.label).toBe('⚙\uFE0F')
-    else expect(await ui.find({ type: 'Svg', alt: 'Open Switchboard' })).toBeDefined()
-    await ui.unmount()
-  }
-})
-
-test('HUD button opens the session-hud pane; three buttons sit two per line', async ($, on) => {
+test('shown buttons sit in one row: plane, gear, HUD; the HUD button opens session-hud', async ($, on) => {
   const ran: string[] = []
-  on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('command.list', () => ({
-    value: [
-      { name: 'flight-recorder', description: 'Open the flight recorder pane' },
-      { name: 'switchboard', description: 'Switchboard' },
-      { name: 'hud', description: 'Open the session dashboard' },
-    ] as never,
-  }))
+  mock.store(on)
+  beneath(on)
   on('command.run', (_$, e) => {
     ran.push(e.command)
     return { text: 'opened' }
   })
-  on('ui.render', { component: 'AbovePrompt' }, ($$, e) => {
-    const { Text } = $$.ui.resolve(e)
-    return <Text>beneath</Text>
-  })
-  await $.session.measure({ context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], changed: ['context'] })
+  await measure($)
+  for (const b of ['flight-recorder', 'switchboard', 'hud']) await toggle($, b)
+  ran.length = 0
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
-    expect(await ui.find({ type: 'Button', key: 'session-hud' })).toBeDefined()
-    // the two lines of the grid: plane and gear, then the HUD (off the terminal each sits in its icon's site)
+    // one row of three (off the terminal each sits in its icon's site)
     const keyOf = (c: { props: { key?: string } }) => c.props.key?.replace(/-site$/, '')
-    const lines = (await ui.findAll({ type: 'Box' })).filter(
+    const rows = (await ui.findAll({ type: 'Box' })).filter(
       b => b.props.flexDirection === 'row' && b.children?.length && b.children.every(c => /^(flight-recorder|switchboard|session-hud)(-site)?$/.test(c.props.key ?? '')),
     )
-    expect(lines.map(l => l.children.map(keyOf))).toEqual([['flight-recorder', 'switchboard'], ['session-hud']])
-    // the HUD's mark: the pane's own ◆ in the terminal, a gauge icon elsewhere
-    if (surface === 'terminal') expect((await ui.find({ type: 'Button', key: 'session-hud' }))?.props.label).toBe('◆')
-    else expect(await ui.find({ type: 'Svg', alt: 'Open the session HUD' })).toBeDefined()
+    expect(rows.map(r => r.children.map(keyOf))).toEqual([['flight-recorder', 'switchboard', 'session-hud']])
+    // the terminal shows glyphs; elsewhere each is an icon named by its alt
+    if (surface === 'terminal') {
+      expect((await ui.find({ type: 'Button', key: 'switchboard' }))?.props.label).toBe('⚙️')
+      expect((await ui.find({ type: 'Button', key: 'session-hud' }))?.props.label).toBe('◆')
+    } else {
+      expect(await ui.find({ type: 'Svg', alt: 'Open Switchboard' })).toBeDefined()
+      expect(await ui.find({ type: 'Svg', alt: 'Open the session HUD' })).toBeDefined()
+    }
     await ui.press({ key: 'session-hud' })
     await ui.unmount()
   }
@@ -176,58 +182,54 @@ test('reset countdown is short, with no space inside', () => {
   expect(untilReset(at(42), now)).toBe('42m')
 })
 
-const ALL_THREE = [
-  { name: 'flight-recorder', description: 'Open the flight recorder pane' },
-  { name: 'switchboard', description: 'Switchboard' },
-  { name: 'hud', description: 'Open the session dashboard' },
-] as never
-
-test('/usageband hide and show a button, and /usageband buttons lists them', async ($, on) => {
+test('/usageband <button> turns it on and off, and /usageband buttons lists them', async ($, on) => {
   mock.store(on)
-  on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('command.list', () => ({ value: ALL_THREE }))
-  on('ui.render', { component: 'AbovePrompt' }, ($$, e) => {
-    const { Text } = $$.ui.resolve(e)
-    return <Text>beneath</Text>
-  })
-  await $.session.measure({ context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], changed: ['context'] })
+  beneath(on)
+  await measure($)
   const band = () => $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
 
-  const hid = await $.command.run({ command: 'usageband', args: 'hide hud' })
-  expect(hid.text).toMatch(/hud button is hidden/)
+  const before = await $.command.run({ command: 'usageband', args: 'buttons' })
+  expect(before.text).toContain('flight-recorder: off')
+  expect(before.text).toContain('hud: off')
+
+  const shown = await toggle($, 'hud')
+  expect(shown.text).toMatch(/hud button is on/)
   let ui = await band()
-  expect(await ui.find({ type: 'Button', key: 'session-hud' })).toBeUndefined()
-  expect(await ui.find({ type: 'Button', key: 'flight-recorder' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'session-hud' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'flight-recorder' })).toBeUndefined()
   await ui.unmount()
 
   const list = await $.command.run({ command: 'usageband', args: 'buttons' })
-  expect(list.text).toContain('flight: on')
-  expect(list.text).toContain('hud: off')
+  expect(list.text).toContain('hud: on')
+  expect(list.text).toContain('flight-recorder: off')
 
-  await $.command.run({ command: 'usageband', args: 'show hud' })
+  const off = await toggle($, 'hud')
+  expect(off.text).toMatch(/hud button is off/)
   ui = await band()
-  expect(await ui.find({ type: 'Button', key: 'session-hud' })).toBeDefined()
+  expect(await ui.find({ type: 'Button' })).toBeUndefined()
   await ui.unmount()
 
-  const wrong = await $.command.run({ command: 'usageband', args: 'hide nope' })
-  expect(wrong.text).toMatch(/flight, switchboard, hud/)
+  const wrong = await toggle($, 'nope')
+  expect(wrong.text).toMatch(/flight-recorder, switchboard, hud/)
 })
 
-test('a hidden button stays hidden in a new session', async ($, on) => {
-  mock.store(on, { hiddenButtons: ['flight'] })
+test('a shown button stays shown in a new session', async ($, on) => {
+  mock.store(on, { shownButtons: ['switchboard'] })
   mock.clock(on)
   on('command.register', () => ({ value: undefined }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
-  on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('command.list', () => ({ value: ALL_THREE }))
-  on('ui.render', { component: 'AbovePrompt' }, ($$, e) => {
-    const { Text } = $$.ui.resolve(e)
-    return <Text>beneath</Text>
-  })
+  beneath(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
-  await $.session.measure({ context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], changed: ['context'] })
+  await measure($)
   const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
-  expect(await ui.find({ type: 'Button', key: 'flight-recorder' })).toBeUndefined()
   expect(await ui.find({ type: 'Button', key: 'switchboard' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'flight-recorder' })).toBeUndefined()
   await ui.unmount()
+})
+
+test('cache hit: the share of input the cache served, green when high', () => {
+  expect(cacheHit(0, 0)).toBeUndefined()
+  expect(cacheHit(63, 100)).toBe(63)
+  expect(cacheHit(1, 3)).toBe(33)
+  expect([hitLevel(90), hitLevel(63), hitLevel(20)]).toEqual(['success', 'warning', 'error'])
 })

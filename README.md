@@ -4,7 +4,7 @@ Five Claude Code mods for keeping an eye on usage, cost, subagents and backgroun
 
 | Mod | What it does | Toggle |
 |---|---|---|
-| `usage-band` | One-line band above the prompt: context fill, API cost, rate limits, model, buttons for the panes | `/usageband` |
+| `usage-band` | One-line band above the prompt: model, context fill, rate limits, cache hit, cost, optional buttons for the panes | `/usageband` |
 | `agents-band` | Live rows for subagents, background shells and monitors, and linked sessions, stacked above the usage band | `/agentsband` |
 | `flight-recorder` | Pane with a live timeline of each turn, per lane (main + subagents) | `/flight-recorder` |
 | `switchboard` | Pane with on/off switches for mods, plugins, skills and MCP servers | `/switchboard` |
@@ -14,20 +14,29 @@ Five Claude Code mods for keeping an eye on usage, cost, subagents and backgroun
 
 ![agents-band rows above the usage-band line, above the prompt](docs/bands.png)
 
-**usage-band** is the bottom row. It answers "how much room and budget do I have left?" without running `/usage` or `/context`:
+**usage-band** is the bottom row: one line that answers "how much room and budget do I have left?" without running `/usage` or `/context`. From left to right:
 
-- **Context** - how full the context window is (percent, bar, tokens used / window size).
-- **API cost** - what this session has cost so far, at API prices.
-- **5h limit / 7d limit** - percent used of each rate limit, with a countdown to its reset (`↻ 2h11m`).
-- **Model** - the model the main loop is running.
-- **Buttons** - two per line, so three fit the band's two lines. Each shows only while its mod is loaded:
-  - **flight** (✈) opens the flight recorder pane.
-  - **switchboard** (⚙️) opens the Switchboard pane without adding a command to the transcript.
-  - **hud** (a gauge on desktop, `◆` in the terminal) opens the `session-hud` pane.
+- **Model** - the model the main loop is running, in Claude orange.
+- **Context** - a bar, then how full the context window is in percent, then tokens used / window size.
+- **5h / 7d** - percent used of each rate limit, then a countdown to its reset (`↻ 1h24m`). The label takes its limit's colour.
+- **Cache hit** - the share of this session's input tokens the prompt cache served, counting every response, subagents included (`56% hit`). It shows from the first response.
+- **Cost** - what this session has cost at API prices, after a 💰, in gold.
 
-On desktop the buttons are 16 px grey icons; the terminal draws them as glyphs. To hide one you don't use, `/usageband hide <button>` (`flight`, `switchboard` or `hud`); `/usageband show <button>` brings it back, and `/usageband buttons` lists them with on/off. What you hide stays hidden in new sessions. `/usageband` alone hides or shows the whole band.
+The sections are spread evenly with a `│` midway between each pair. Context and limit percentages turn yellow at 50% and red at 80%; the cache hit rate goes the other way: green from 80%, yellow from 50%, red below. The band refreshes while you are idle, so the countdowns stay accurate, and it steps aside when a survey or question takes that spot.
 
-Percentages turn yellow at 50% and red at 80%. The band refreshes while you are idle, so the countdowns stay accurate, and it steps aside when a survey or question takes that spot.
+**Buttons** sit at the end of the line, and they are off by default. Each one shows only once you turn it on and while its mod is loaded:
+
+- **flight-recorder** (✈) opens the flight recorder pane.
+- **switchboard** (⚙️) opens the Switchboard pane without adding a command to the transcript.
+- **hud** (a gauge on desktop, `◆` in the terminal) opens the `session-hud` pane, also without a command in the transcript.
+
+| Command | What it does |
+|---|---|
+| `/usageband` | Hides or shows the whole band |
+| `/usageband <button>` | Turns that button on when off, off when on (`flight-recorder`, `switchboard` or `hud`). Kept in new sessions |
+| `/usageband buttons` | Lists the buttons, on or off, and which mods aren't loaded |
+
+The command's hint lists the button names as you type; the slash menu can't autocomplete arguments. On desktop the buttons are 16 px grey icons, and the terminal draws them as glyphs.
 
 **agents-band** is the top block. It appears only while there is something to show (subagents, background tasks or linked sessions), so it costs no space the rest of the time. Each subagent row shows:
 
