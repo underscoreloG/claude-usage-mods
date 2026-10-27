@@ -113,8 +113,8 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'usageband',
-      description: 'Show or hide the usage band; with a button name, turn that button on or off',
-      argumentHint: '[flight-recorder | switchboard | hud | buttons]',
+      description: 'Show or hide the usage band; open a pane, or turn its button on or off',
+      argumentHint: '[open] flight-recorder | switchboard | hud, or buttons',
     })
     const saved = await $.store.get('shownButtons')
     if (Array.isArray(saved)) {
@@ -134,7 +134,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'usageband' }, async ($, e) => {
-    const verb = e.args.trim()
+    const [first = '', second] = e.args.trim().split(/\s+/)
+    const verb = first
     if (!verb) {
       const hidden = await update($, hiddenAtom, h => !h)
       return { text: hidden ? 'Usage band hidden.' : 'Usage band shown.' }
@@ -153,6 +154,24 @@ export const register: Register = on => {
       )
       return { text: `Usage band buttons\n${rows.join('\n')}\nTurn one on or off with /usageband <button>.` }
     }
+    // open <name> opens that pane, as its button would: its command runs through the command
+    // chain, not the prompt, so no second line lands in the transcript. A command can't run another
+    // from inside its own hook (it would wait on the turn this one holds), so it runs just after.
+    if (verb === 'open') {
+      const target = BUTTONS.find(b => b.name === second)
+      if (!target) return { text: `Use /usageband open <pane> (${names}).` }
+      let loaded = true
+      try {
+        loaded = (await $.command.list()).some(c => c.name === target.command)
+      } catch {
+        // no command list: try it anyway
+      }
+      if (!loaded) return { text: `The ${target.name} mod is not loaded.` }
+      $.clock.after(0, () => {
+        void $.command.run({ command: target.command }).catch(() => $.ui.toast(`Could not open ${target.name}.`))
+      })
+      return {}
+    }
     // a button's name turns it on when off, off when on
     if (BUTTONS.some(b => b.name === verb)) {
       const shownButtons = await update($, shownButtonsAtom, list =>
@@ -161,7 +180,7 @@ export const register: Register = on => {
       await $.store.set('shownButtons', shownButtons)
       return { text: `The ${verb} button is ${shownButtons.includes(verb) ? 'on' : 'off'}. It stays that way in new sessions.` }
     }
-    return { text: `Use /usageband, /usageband buttons, or /usageband <button> (${names}).` }
+    return { text: `Use /usageband, /usageband buttons, /usageband open <pane>, or /usageband <button> (${names}).` }
   })
 
   on('session.measure', async ($, e, next) => {
@@ -214,7 +233,7 @@ export const register: Register = on => {
     }
     const pct = usage.percent ?? 0
 
-    // One line: each group is its value alone, the limits led by "5h" or "7d" in their colour
+    // One line: each group is its value alone, the limits led by a blue "5h" or "7d"
     const group = (value: RenderElement) => <Text wrap="truncate">{value}</Text>
     // In order: model, context, 5h and 7d limits, cache hit, cost
     const groups: RenderElement[] = []
@@ -240,7 +259,7 @@ export const register: Register = on => {
       groups.push(
         group(
           <Text>
-            <Text color={level(l.percentUsed)}>{limitName(l.kind)} </Text>
+            <Text color="suggestion">{limitName(l.kind)} </Text>
             <Text color={level(l.percentUsed)} bold>
               {l.percentUsed}%
             </Text>

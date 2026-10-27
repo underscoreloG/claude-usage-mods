@@ -18,7 +18,7 @@ Five Claude Code mods for keeping an eye on usage, cost, subagents and backgroun
 
 - **Model** - the model the main loop is running, in Claude orange.
 - **Context** - a bar, then how full the context window is in percent, then tokens used / window size.
-- **5h / 7d** - percent used of each rate limit, then a countdown to its reset (`↻ 1h24m`). The label takes its limit's colour.
+- **5h / 7d** - percent used of each rate limit, then a countdown to its reset (`↻ 1h24m`). The `5h` and `7d` labels are blue.
 - **Cache hit** - the share of this session's input tokens the prompt cache served, counting every response, subagents included (`56% hit`). It shows from the first response.
 - **Cost** - what this session has cost at API prices, after a 💰, in gold.
 
@@ -33,10 +33,11 @@ The sections are spread evenly with a `│` midway between each pair. Context an
 | Command | What it does |
 |---|---|
 | `/usageband` | Hides or shows the whole band |
+| `/usageband open <pane>` | Opens that pane (`flight-recorder`, `switchboard` or `hud`), with or without its button |
 | `/usageband <button>` | Turns that button on when off, off when on (`flight-recorder`, `switchboard` or `hud`). Kept in new sessions |
 | `/usageband buttons` | Lists the buttons, on or off, and which mods aren't loaded |
 
-The command's hint lists the button names as you type; the slash menu can't autocomplete arguments. On desktop the buttons are 16 px grey icons, and the terminal draws them as glyphs.
+The command's hint lists the names as you type; the slash menu can't autocomplete arguments. Each pane's own command (`/flight-recorder`, `/switchboard`, `/hud`) opens it too. On desktop the buttons are 16 px grey icons, and the terminal draws them as glyphs.
 
 **agents-band** is the top block. It appears only while there is something to show (subagents, background tasks or linked sessions), so it costs no space the rest of the time. Each subagent row shows:
 

@@ -58,11 +58,13 @@ test('band is one line: model, context, limits, cache hit, cost, in that order, 
     const cost = at('$0.44')
     // the cost is led by a money bag
     expect(texts[cost - 1]).toBe('💰 ')
-    // colours: gold cost, limit labels in their limit's colour (1% is green, 83% red)
+    // colours: gold cost, blue limit labels, each limit's percentage in its level (1% green, 83% red)
     const colorOf = async (text: string) => (await ui.findAll({ type: 'Text', text })).map(t => t.props.color).filter(Boolean)
     expect(await colorOf('$0.44')).toEqual(['warning'])
-    expect(await colorOf('5h ')).toEqual(['success'])
-    expect(await colorOf('7d ')).toEqual(['error'])
+    expect(await colorOf('5h ')).toEqual(['suggestion'])
+    expect(await colorOf('7d ')).toEqual(['suggestion'])
+    expect(await colorOf('1%')).toEqual(['success'])
+    expect(await colorOf('83%')).toEqual(['error'])
     const five = texts.findIndex(t => /^5h 1%/.test(t))
     const seven = texts.findIndex(t => /^7d 83%/.test(t))
     expect(ctx).toBeGreaterThan(-1)
@@ -232,4 +234,30 @@ test('cache hit: the share of input the cache served, green when high', () => {
   expect(cacheHit(63, 100)).toBe(63)
   expect(cacheHit(1, 3)).toBe(33)
   expect([hitLevel(90), hitLevel(63), hitLevel(20)]).toEqual(['success', 'warning', 'error'])
+})
+
+test('/usageband open <pane> opens it through its command, just after, buttons on or off', async ($, on) => {
+  const ran: string[] = []
+  mock.store(on)
+  const clock = mock.clock(on)
+  beneath(on)
+  on('command.run', (_$, e) => {
+    ran.push(e.command)
+    return { text: 'opened' }
+  })
+  for (const pane of ['flight-recorder', 'switchboard', 'hud']) {
+    const out = await $.command.run({ command: 'usageband', args: 'open ' + pane })
+    expect(out.text).toBeUndefined()
+  }
+  await clock.settle()
+  expect(ran).toEqual(['flight-recorder', 'switchboard', 'hud'])
+  const wrong = await $.command.run({ command: 'usageband', args: 'open nope' })
+  expect(wrong.text).toMatch(/open <pane> \(flight-recorder, switchboard, hud\)/)
+})
+
+test('/usageband open says so when that mod is not loaded', async ($, on) => {
+  mock.store(on)
+  beneath(on, [] as never)
+  const out = await $.command.run({ command: 'usageband', args: 'open hud' })
+  expect(out.text).toBe('The hud mod is not loaded.')
 })
