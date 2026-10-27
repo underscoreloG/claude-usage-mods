@@ -352,7 +352,8 @@ export const register: Register = on => {
 
     const separator = <Text dimColor>│</Text>
     // Sections and separators alternate in one row spread with equal gaps, so each separator
-    // sits midway between its neighbours: the first section at the left edge, the last at the right
+    // sits midway between its neighbours: the first section at the left edge, the last at the right.
+    // The gap keeps at least a space either side of each separator when the band is narrow.
     const sections: RenderElement[] = [...groups]
     if (buttons.length > 0) {
       sections.push(
@@ -362,7 +363,7 @@ export const register: Register = on => {
       )
     }
     const row = (
-      <Box flexDirection="row" alignItems="center" justifyContent="space-between" width="100%">
+      <Box flexDirection="row" alignItems="center" justifyContent="space-between" gap={1} width="100%">
         {sections.flatMap((section, i) => (i > 0 ? [separator, section] : [section]))}
       </Box>
     )

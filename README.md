@@ -12,7 +12,7 @@ Five Claude Code mods for keeping an eye on usage, cost, subagents and backgroun
 
 ## usage-band and agents-band
 
-![agents-band rows above the usage-band line, above the prompt](docs/bands.png)
+![usage-band line above the prompt: model, context, 5h and 7d limits, cache hit, cost](docs/bands.png)
 
 **usage-band** is the bottom row: one line that answers "how much room and budget do I have left?" without running `/usage` or `/context`. From left to right:
 
@@ -98,7 +98,7 @@ A side pane with an on/off switch for everything loaded into a session, in four 
 
 ## session-hud
 
-![session-hud pane on desktop, just after a reload](docs/session-hud.png)
+![session-hud pane on desktop after a turn of work: context, cost, cost per turn, tools, files changed, now](docs/session-hud.png)
 
 A side pane with one card per question, opened with `/hud` or the band's HUD button (Esc closes it). The button opens it with no `/hud` line in the transcript:
 

@@ -73,6 +73,8 @@ test('band is one line: model, context, limits, cache hit, cost, in that order, 
     expect(texts.filter(t => t === '│')).toHaveLength(3)
     // spread with equal gaps: sections and separators alternate in one space-between row
     const row = (await ui.findAll({ type: 'Box' })).find(box => box.props.justifyContent === 'space-between')
+    // and never closer than a space, so a narrow band doesn't press them against the text
+    expect(row?.props.gap).toBe(1)
     expect(row?.children.map(c => (c.type === 'Text' && c.props.wrap === undefined ? '│' : 'section'))).toEqual(['section', '│', 'section', '│', 'section', '│', 'section'])
     // shares the band: the mod beneath is drawn first, this row under it
     expect(at('AGENT ROWS')).toBeGreaterThan(-1)
