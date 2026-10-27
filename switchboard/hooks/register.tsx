@@ -174,14 +174,16 @@ export const register: Register = on => {
 
     // On a surface with Svg the control is the drawing, pressed through a
     // Button laid over it; the terminal draws the glyph switch instead.
-    const control = (key: string, label: string, svg: string, glyphs: ReturnType<typeof h>, onPress: () => void) =>
+    const control = (key: string, label: string, svg: string, size: [number, number], glyphs: ReturnType<typeof h>, onPress: () => void) =>
       Svg === undefined ? (
         <Button key={key} label={label} plain onPress={onPress}>
           {glyphs}
         </Button>
       ) : (
         <Box key={`${key}-site`} position="relative">
-          <Svg source={svg} alt={label} />
+          {/* A set size: left out, the desktop fits the drawing to the room its row leaves,
+              so a long summary shrank the pill or squeezed it out */}
+          <Svg source={svg} alt={label} width={size[0]} height={size[1]} />
           <Box position="absolute" top={0} left={0} right={0} bottom={0}>
             {/* No label: the desktop draws it over the drawing; the Svg's alt names it.
                 Blank Braille cells give the button the drawing's width: a plain
@@ -198,6 +200,7 @@ export const register: Register = on => {
         key,
         isOn ? `Switch ${name} off` : `Switch ${name} on`,
         switchSvg(isOn),
+        [44, 26],
         isOn
           ? <Text color="success" weight="semibold">━━● ON </Text>
           : <Text color="inactive">○── OFF</Text>,
@@ -216,13 +219,14 @@ export const register: Register = on => {
     }
     const row = (one: Row) => (
       <Box key={`row-${one.key}`} flexDirection="row" justifyContent="space-between" alignItems="center" marginBottom={1}>
-        <Box flexDirection="column" flexShrink={1}>
+        {/* The text gives way (its summary truncates); the controls keep their size */}
+        <Box flexDirection="column" flexShrink={1} minWidth={0}>
           <Text weight="semibold" dimColor={!one.isOn}>{one.title}</Text>
           {one.summary !== undefined && <Text dimColor wrap="truncate-end">{one.summary}</Text>}
           {one.hint !== undefined && <Text dimColor italic>{one.hint}</Text>}
           {one.status !== undefined && <Text dimColor size="footnote">{one.status}</Text>}
         </Box>
-        <Box flexDirection="row" alignItems="center" columnGap={1}>
+        <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
           {one.extra}
           {switchControl(one.key, one.title, one.isOn, one.onToggle)}
         </Box>
@@ -338,6 +342,7 @@ export const register: Register = on => {
                     `panel-${mod.name}`,
                     isShown ? `Hide ${mod.name} panels` : `Show ${mod.name} panels`,
                     eyeSvg(isShown),
+                    [28, 26],
                     isShown
                       ? <Text color="suggestion">◉ panels</Text>
                       : <Text color="inactive" strikethrough>◌ panels</Text>,

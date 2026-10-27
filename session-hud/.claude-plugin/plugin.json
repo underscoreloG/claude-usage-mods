@@ -1,0 +1,5 @@
+{
+  "name": "session-hud",
+  "version": "0.1.0",
+  "description": "/hud pane: context meter, cost per turn, tools used, files changed, what Claude is doing now. Trimmed from StackSprint session-guard 0.1.2 (MIT)"
+}

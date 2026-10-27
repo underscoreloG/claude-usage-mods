@@ -56,6 +56,9 @@ test('off stubs a mod\'s hooks.json, on restores it, switches persist', async ($
 
   const desk = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await desk.find({ type: 'Svg' }))?.props.alt).toBe('Switch noisy off')
+  // every pill is drawn at its own size, so a long summary can't shrink or hide it
+  const pill = await desk.find({ type: 'Svg' })
+  expect([pill?.props.width, pill?.props.height]).toEqual([44, 26])
   await desk.press({ key: 'on-noisy' })
   expect(store.get('off')).toEqual(['noisy'])
   expect((await desk.find({ type: 'Svg' }))?.props.alt).toBe('Switch noisy on')
