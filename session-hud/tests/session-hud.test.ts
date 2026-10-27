@@ -50,6 +50,12 @@ test('the pane shows context, turns, tools, files and what runs now, on every su
     expect(await ui.find({ type: 'Text', text: /3 calls/ })).toBeTruthy()
     // The running command shows with the key hidden and the project path trimmed
     expect((await ui.find({ type: 'Text', text: /▶/ }))?.text).toBe('▶ Bash: curl -H "x-api-key: [ANTHROPIC KEY]" x')
+    // one turn draws one 12px bar at its own size, not scaled up to the card
+    if (surface === 'desktop' || surface === 'mobile') {
+      const turns = (await ui.findAll({ type: 'Svg' })).find(svg => svg.props.alt === '1 turns')
+      expect(turns).toBeDefined()
+      expect([turns?.props.width, turns?.props.height]).toEqual([16, 32])
+    }
     expect(await ui.find({ type: 'Text', text: /BUDGET/ })).toBeFalsy()
     // Desktop and mobile lay out in pixels: bars are Svg, not block characters
     if (surface === 'desktop' || surface === 'mobile') expect(await ui.find({ type: 'Svg' })).toBeTruthy()
@@ -71,3 +77,4 @@ test('NOW shows one line of a long command, cut at 60 characters', async ($, on)
     await ui.unmount()
   }
 })
+

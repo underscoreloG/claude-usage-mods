@@ -113,6 +113,13 @@ export const register: Register = (on) => {
     return {}
   })
 
+  // usage-band's HUD button: opens the pane straight from the press, so no /hud shows in the
+  // transcript, and takes the press (as Switchboard does for the band's gear)
+  on('ui.press', { plugin: 'usage-band', element: 'session-hud' }, async ($, e) => {
+    await $.ui.open({ id: PANE, title: 'Session HUD', closeOnEscape: true })
+    return { element: e.element }
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
     const { Box, Text } = els
@@ -218,9 +225,12 @@ export const register: Register = (on) => {
           Raster
             ? Raster({ key: 'turns', columns: bottom.length, rows: 2, cells: cells([...top_, ...bottom]) })
             : Svg
-            // The same bars in pixels: 12 wide, 4 apart, up to 32 tall
+            // The same bars in pixels: 12 wide, 4 apart, up to 32 tall. Width and height are set:
+            // left out, the desktop scales the drawing up to the card's width, and one bar fills it
             ? Svg({
                 alt: shown.length + ' turns',
+                width: shown.length * 16,
+                height: 32,
                 source: '<svg xmlns="http://www.w3.org/2000/svg" width="' + shown.length * 16 + '" height="32" viewBox="0 0 ' + shown.length * 16 + ' 32">'
                   + shown.map((v, i) => {
                     const h = Math.max(2, Math.round((v / top) * 32))

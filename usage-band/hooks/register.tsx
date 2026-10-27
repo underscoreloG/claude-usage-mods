@@ -246,7 +246,8 @@ export const register: Register = on => {
         <Button key={key} label={glyph} onPress={onPress} />
       ) : (
         <Box key={`${key}-site`} position="relative">
-          <Svg source={svg} alt={label} />
+          {/* A set size: left out, the desktop may scale the icon to the space it has */}
+          <Svg source={svg} alt={label} width={ICON} height={ICON} />
           <Box position="absolute" top={0} left={0} right={0} bottom={0}>
             {/* No label: the desktop draws it over the icon. Blank Braille cells give the
                 Button something to press: a plain space collapses to nothing. */}
@@ -277,6 +278,8 @@ export const register: Register = on => {
         ),
       )
     }
+    // session-hud's ui.press hook opens its pane and takes the press, so no /hud shows in the
+    // transcript; running the command is the fallback when that hook did not answer.
     if (hasHud) {
       buttons.push(
         button('session-hud', 'Open the session HUD', '◆', GAUGE_SVG, async () => {

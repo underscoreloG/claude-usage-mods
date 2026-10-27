@@ -90,7 +90,7 @@ A side pane with an on/off switch for everything loaded into a session, in four 
 
 ![session-hud pane on desktop, just after a reload](docs/session-hud.png)
 
-A side pane with one card per question, opened with `/hud` (Esc closes it):
+A side pane with one card per question, opened with `/hud` or the band's HUD button (Esc closes it). The button opens it with no `/hud` line in the transcript:
 
 - **Context** - percent and tokens used of the window, with a meter that turns amber at 60% and red at 85%.
 - **Cost** - what this session has cost, and what the last turn cost.
