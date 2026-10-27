@@ -1,6 +1,6 @@
 # claude-usage-mods
 
-Four Claude Code mods for keeping an eye on usage, cost, subagents and background tasks while you work, and for switching what is loaded on or off.
+Five Claude Code mods for keeping an eye on usage, cost, subagents and background tasks while you work, and for switching what is loaded on or off.
 
 | Mod | What it does | Toggle |
 |---|---|---|
@@ -8,6 +8,7 @@ Four Claude Code mods for keeping an eye on usage, cost, subagents and backgroun
 | `agents-band` | Live rows for subagents, background shells and monitors, and linked sessions, stacked above the usage band | `/agentsband` |
 | `flight-recorder` | Pane with a live timeline of each turn, per lane (main + subagents) | `/flight-recorder` |
 | `switchboard` | Pane with on/off switches for mods, plugins, skills and MCP servers | `/switchboard` |
+| `session-hud` | Pane with session cards: context, cost, cost per turn, tools used, files changed, what runs now | `/hud` |
 
 ## usage-band and agents-band
 
@@ -81,6 +82,25 @@ A side pane with an on/off switch for everything loaded into a session, in four 
 - On desktop the switches are drawn as SVG pills; the terminal gets `━━● ON` / `○── OFF`.
 - `/switchboard on|off|hide|show <mod>` does the same from the prompt.
 
+## session-hud
+
+![session-hud pane on desktop, just after a reload](docs/session-hud.png)
+
+A side pane with one card per question, opened with `/hud` (Esc closes it):
+
+- **Context** - percent and tokens used of the window, with a meter that turns amber at 60% and red at 85%.
+- **Cost** - what this session has cost, and what the last turn cost.
+- **Cost per turn** - one bar per turn, with the last and average cost.
+- **Tools** - the six busiest tools, each with its own color.
+- **Files changed** - files Claude edited or wrote, with how many times.
+- **Now** - the tool running right now, cut to one line of 60 characters. Keys, tokens and email addresses are masked before the cut.
+
+It only observes and draws: no tool call or prompt is changed or refused. Counters live in the mod, so a reload of the mod starts them again from zero.
+
+Desktop and mobile get cards that fill the pane, SVG bars and a gap between cards; on a narrow pane Context and Cost stack. The terminal gets fixed-width cards and `Raster` bars. The layout is picked by `e.surface`, not by which elements the surface offers, since the desktop table carries `Raster` too.
+
+Trimmed from the `/hud` dashboard of StackSprint's [session-guard](https://github.com/stacksprint-io/claude-code-playbook/tree/main/mods/session-guard) 0.1.2 (MIT, see `session-hud/LICENSE`), without its status band, budget guard and recording mode.
+
 ## Install
 
 1. Clone the repo anywhere, for example `~/.claude/mods`.
@@ -89,7 +109,7 @@ A side pane with an on/off switch for everything loaded into a session, in four 
 ```json
 {
   "env": {
-    "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/usage-band:/path/to/agents-band:/path/to/flight-recorder:/path/to/switchboard"
+    "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/usage-band:/path/to/agents-band:/path/to/flight-recorder:/path/to/switchboard:/path/to/session-hud"
   }
 }
 ```
