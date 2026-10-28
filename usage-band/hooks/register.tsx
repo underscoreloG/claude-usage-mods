@@ -319,7 +319,8 @@ export const register: Register = on => {
         <Text wrap="truncate">
           {clock && (
             <Text color={HUE[clock.mode]}>
-              <Text bold>{clock.mode}</Text> {fmtMins(clock.mins)}
+              {/* warm counts down from the hour in minutes (60m, not 1h0m); cold says how long idle */}
+              <Text bold>{clock.mode}</Text> {clock.mode === 'warm' ? `${clock.mins}m` : fmtMins(clock.mins)}
               {hit !== undefined && ' '}
             </Text>
           )}

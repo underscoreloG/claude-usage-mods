@@ -291,4 +291,9 @@ test('a resumed session shows the cache cold with its idle time, Robo only off t
   await $.classic.SessionStart({ source: 'clear' } as never)
   const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
   expect((await ui.findAll({ type: 'Text' })).map(t => t.text).some(t => /^(warm|cold) /.test(t))).toBe(false)
+  await ui.unmount()
+  // just after a reply the warm countdown reads the full hour in minutes, not 1h0m
+  await $.classic.SessionStart({ source: 'fork', seconds_since_last_response: 0 } as never)
+  const fresh = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect((await fresh.findAll({ type: 'Text' })).map(t => t.text)).toContain('warm 60m')
 })

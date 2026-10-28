@@ -25,8 +25,8 @@ const SECRETS: [RegExp, string][] = [
 const PANE = 'session-hud'
 // The prompt cache card, ribbon's drawing in a pane of its own: /hud-cache, or Robo in usage-band
 const CACHE_PANE = 'hud-cache'
-// The card's drawing width in pixels: ribbon's two-row layout, scaled to the pane
-const CARD_W = 640
+// The card's drawing width in pixels: ribbon's two-row layout at its narrowest, so it scales down least
+const CARD_W = 600
 const SPARK = '▁▂▃▄▅▆▇█'
 
 // The dashboard's palette, as 0xRRGGBB
@@ -178,9 +178,10 @@ export const register: Register = (on) => {
     if (!view) return Box({ flexDirection: 'column', paddingX: 1, children: [Text({ color: hex(C.dim), children: ['The cache shows after the first reply.'] })] })
     const cold = view.mode === 'cold'
     if (Svg) {
-      // No width or height: the drawing scales to the pane. Interactive, so Robo bobs and the ice twinkles
+      // No width or height and not interactive: the desktop draws it as an image scaled to the pane.
+      // An interactive one (Robo bobbing) got a small frame of its own, seen live, so Robo holds still here
       const card = cardSvg(view, 'stacked', CARD_W)
-      return Box({ flexDirection: 'column', gap: 1, children: [Svg({ source: card.source, alt: card.alt, isInteractive: true }), note] })
+      return Box({ flexDirection: 'column', gap: 1, children: [Svg({ source: card.source, alt: card.alt }), note] })
     }
     // The terminal gets the same facts as text
     const prices = MODELS.map((m) => m.NAME + ' ' + usd(costOf(m, view.mode, view.tokens)) + (m.id === view.mine ? ' (you)' : '')).join('  ')
