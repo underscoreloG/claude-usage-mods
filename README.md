@@ -14,15 +14,19 @@ Commands follow one scheme: `/hud-<name>` opens a pane, `/band-<name>` shows or 
 
 ## usage-band and agents-band
 
-![usage-band line above the prompt: model, context, 5h and 7d limits, cache hit, cost](docs/bands.png)
+![usage-band, wide and narrow: model, context, 5h and 7d limits, the cache with Robo, cost](docs/usage-band.png)
+
+*Rendered from the band's layout and Robo's own drawing code, not captured from the app.*
 
 **usage-band** is the bottom row: one line that answers "how much room and budget do I have left?" without running `/usage` or `/context`. From left to right:
 
 - **Model** - the model the main loop is running, in Claude orange.
 - **Context** - a bar, then how full the context window is in percent, then tokens used / window size.
 - **5h / 7d** - percent used of each rate limit, then a countdown to its reset (`↻ 1h24m`). The `5h` and `7d` labels are blue.
-- **Cache hit** - the share of this session's input tokens the prompt cache served, counting every response, subagents included (`56% hit`). It shows from the first response.
-- **Cost** - what this session has cost at API prices, after a 💰, in gold.
+- **Cache** - Robo, then `warm 54m` (minutes before the prompt cache goes cold) or `cold 2h5m` (how long it has been idle), then the hit rate: the share of this session's input tokens the cache served, every response counted, subagents included. Robo bobs while the cache is warm and sits frozen in ice once it is cold; pressing it opens the `/hud-cache` card. The clock restarts at each main-thread request (subagents keep their own cache), picks up a resumed session's idle time, and starts over on `/clear` and `/compact`. It assumes the 1 hour cache: a session on the 5 minute cache goes cold sooner than it shows.
+- **Cost** - what this session has cost at API prices, after a 💰, in dim grey: an estimate, so it reads quietly.
+
+**Narrow band.** Under 100 cells (the room a full line takes) each section keeps its number alone: the model, context %, `5h` and `7d` %, Robo with the hit %, and the cost without its 💰. The context bar, token counts, reset countdowns and the cache's word and time drop out. The terminal draws no Robo, so there the cache keeps its `warm` or `cold`.
 
 The sections are spread evenly with a `│` midway between each pair. Context and limit percentages turn yellow at 50% and red at 80%; the cache hit rate goes the other way: green from 80%, yellow from 50%, red below. The band refreshes while you are idle, so the countdowns stay accurate, and it steps aside when a survey or question takes that spot.
 
@@ -40,6 +44,8 @@ The sections are spread evenly with a `│` midway between each pair. Context an
 | `/band-usage buttons` | Lists the buttons, on or off, and which mods aren't loaded |
 
 The command's hint lists the names as you type; the slash menu can't autocomplete arguments. Each pane's own command (`/hud-flight-recorder`, `/hud-switchboard`, `/hud-session`) opens it too. On desktop the buttons are 16 px grey icons, and the terminal draws them as glyphs.
+
+![agents-band rows stacked above the usage band (the usage band shown here is the earlier, pre-cache layout)](docs/bands.png)
 
 **agents-band** is the top block. It appears only while there is something to show (subagents, background tasks or linked sessions), so it costs no space the rest of the time. Each subagent row shows:
 
@@ -68,7 +74,7 @@ The data comes from the desktop app's `ccd_session_mgmt` MCP server (`list_sessi
 
 ## flight-recorder
 
-![flight-recorder pane, text view, showing one turn with the main lane and two subagent lanes](docs/hud-flight-recorder.png)
+![flight-recorder pane, text view, showing one turn with the main lane and two subagent lanes](docs/flight-recorder.png)
 
 A side pane that records what happens inside each turn, so you can see where time and tokens went:
 
@@ -80,6 +86,10 @@ A side pane that records what happens inside each turn, so you can see where tim
 In the screenshot, main (opus) used 92% of the tokens for the turn and the two sonnet subagents only 8%. A spend split like that is the thing this pane makes easy to see.
 
 Two views: **Text** (default, works in the terminal too) and **Dashboard** (SVG charts: cost per turn, tokens by model, top tools; desktop only). `/hud-flight-recorder text` or `/hud-flight-recorder dashboard` opens the pane on that view. Earlier turns are kept below the current one.
+
+![flight-recorder Dashboard view: turn figures, lane timeline, tokens by model, top tools, cost per turn](docs/flight-recorder-dashboard.png)
+
+The Dashboard wears the same card as `/hud-cache`: a warm dark surface, the Outfit font, small uppercase labels over big figures, and rules between them. The model and tool colors are the dataviz reference palette, checked against that surface with its validator.
 
 ## switchboard
 
@@ -95,12 +105,12 @@ A side pane with an on/off switch for everything loaded into a session, in four 
 - Mods that open panels also get an eye button: hiding blocks their panes without switching them off.
 - The first time it edits `~/.claude/settings.json` it keeps the original as `settings.json.switchboard-backup`.
 - A blocked skill stays in Claude's list; calls to it are refused. A switched-off MCP server's tools are still listed, marked off.
-- On desktop the switches are drawn as SVG pills; the terminal gets `━━● ON` / `○── OFF`.
+- On desktop the pane takes the `/hud-cache` card's colors: a warm dark surface, cream titles, muted summaries, and switches drawn as warm red pills with a cream knob when on, dark with a grey knob when off. The terminal keeps its theme's colors and gets `━━● ON` / `○── OFF`.
 - `/hud-switchboard on|off|hide|show <mod>` does the same from the prompt.
 
 ## session-hud
 
-![session-hud pane on desktop after a turn of work: context, cost, cost per turn, tools, files changed, now](docs/session-hud.png)
+![session-hud pane on desktop: context, cost, cost per turn, tools, files changed, now, as one card](docs/session-hud.png)
 
 A side pane with one card per question, opened with `/hud-session` or the band's HUD button (Esc closes it). The button opens it with no `/hud-session` line in the transcript:
 
@@ -113,9 +123,19 @@ A side pane with one card per question, opened with `/hud-session` or the band's
 
 It only observes and draws: no tool call or prompt is changed or refused. Counters live in the mod, so a reload of the mod starts them again from zero.
 
-Desktop and mobile get cards that fill the pane, SVG bars and a gap between cards; on a narrow pane Context and Cost stack. The terminal gets fixed-width cards and `Raster` bars. The layout is picked by `e.surface`, not by which elements the surface offers, since the desktop table carries `Raster` too.
+Desktop and mobile get one drawn card, scaled to the pane, in the `/hud-cache` look: big figures, dot meters, uppercase labels. Tools are colored by kind (read, edit, shell, other), the same as the flight recorder. The terminal gets fixed-width cards and `Raster` bars. The layout is picked by `e.surface`, not by which elements the surface offers, since the desktop table carries `Raster` too.
 
-Trimmed from the `/hud-session` dashboard of StackSprint's [session-guard](https://github.com/stacksprint-io/claude-code-playbook/tree/main/mods/session-guard) 0.1.2 (MIT, see `session-hud/LICENSE`), without its status band, budget guard and recording mode.
+### Prompt cache card
+
+![/hud-cache card: warm, idle 6m and cold in 54m, 245k tokens in cache, next message cost per model with Opus marked YOU](docs/hud-cache.png)
+
+`/hud-cache`, or pressing Robo in the band, opens a pane with the prompt cache up close: how long since the last request and when it goes cold, how many tokens the cache holds (as a share of the context window), and what the next message would cost on each model, yours marked YOU. Cold, it shows what re-caching the whole conversation costs. Prices are list-price estimates from a table in `session-hud/hooks/cache-art.ts`, not your bill. The terminal gets the same facts as text.
+
+The card, Robo and the Outfit font come from [ribbon](https://github.com/robonuggets/ribbon) by Jay E | RoboNuggets (MIT, see `session-hud/LICENSE` and the `THIRD-PARTY-NOTICES` files).
+
+### Origin
+
+Trimmed from the `/hud` dashboard of StackSprint's [session-guard](https://github.com/stacksprint-io/claude-code-playbook/tree/main/mods/session-guard) 0.1.2 (MIT, see `session-hud/LICENSE`), without its status band, budget guard and recording mode.
 
 ## Install
 

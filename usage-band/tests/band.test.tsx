@@ -58,9 +58,10 @@ test('band is one line: model, context, limits, cache hit, cost, in that order, 
     const cost = at('$0.44')
     // the cost is led by a money bag
     expect(texts[cost - 1]).toBe('💰 ')
-    // colours: gold cost, blue limit labels, each limit's percentage in its level (1% green, 83% red)
+    // colours: a dim, quiet cost (an estimate), blue limit labels, each limit's percentage in its level (1% green, 83% red)
     const colorOf = async (text: string) => (await ui.findAll({ type: 'Text', text })).map(t => t.props.color).filter(Boolean)
-    expect(await colorOf('$0.44')).toEqual(['warning'])
+    expect(await colorOf('$0.44')).toEqual([])
+    expect((await ui.findAll({ type: 'Text', text: '$0.44' })).some(t => t.props.dimColor === true)).toBe(true)
     expect(await colorOf('5h ')).toEqual(['suggestion'])
     expect(await colorOf('7d ')).toEqual(['suggestion'])
     expect(await colorOf('1%')).toEqual(['success'])
@@ -280,7 +281,7 @@ test('a resumed session shows the cache cold with its idle time, Robo only off t
   beneath(on)
   on('classic.SessionStart', () => ({}))
   on('clock.now', () => ({ value: 50_000_000 }))
-  await measure($)
+  await $.session.measure({ context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], cost: { usd: 0.44 }, changed: ['context', 'cost'] })
   await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 2 * 3600 + 5 * 60 } as never)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
@@ -297,10 +298,16 @@ test('a resumed session shows the cache cold with its idle time, Robo only off t
   const fresh = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   expect((await fresh.findAll({ type: 'Text' })).map(t => t.text)).toContain('warm 60m')
   await fresh.unmount()
-  // a narrow band keeps Robo, the time and the %, without the word; the terminal, with no Robo, keeps it
+  // a narrow band keeps each number alone: context % with no bar or tokens, and the cache without
+  // its word beside Robo (the terminal, with no Robo, keeps the word); before a response counts,
+  // the time stays, as it is all the cache has to show
   for (const surface of ['desktop', 'terminal'] as const) {
     const narrow = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 80 } })
-    expect((await narrow.findAll({ type: 'Text' })).map(t => t.text)).toContain(surface === 'desktop' ? '60m' : 'warm 60m')
+    const texts = (await narrow.findAll({ type: 'Text' })).map(t => t.text)
+    expect(texts).toContain(surface === 'desktop' ? '60m' : 'warm 60m')
+    expect(texts).toContain('1%')
+    expect(texts).toContain('$0.44')
+    expect(texts.some(t => t.includes('▰') || t.includes('1.0k') || t.includes('💰'))).toBe(false)
     await narrow.unmount()
   }
 })

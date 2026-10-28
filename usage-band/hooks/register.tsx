@@ -27,8 +27,9 @@ const ICON = 16
 const ICON_GREY = '#8B8B95'
 // Robo stands a little taller than the icons, as ribbon's does beside its chip
 const ROBO = 18
-// Cells a full one-line band takes (model, context, 5h, 7d, cache, cost and separators: about 97);
-// narrower, the cache drops its warm/cold word beside Robo, whose look already says which
+// Cells a full one-line band takes (model, context, 5h, 7d, cache, cost and separators: about 97).
+// Narrower, each group keeps its number alone: context % without its bar and tokens, the limits
+// without their reset, the cache as Robo and its hit % (the word where there is no Robo)
 const WIDE_BAND = 100
 // U+2800 draws nothing yet is not whitespace, so no surface trims it away
 const BLANK = '\u2800'.repeat(2)
@@ -275,6 +276,7 @@ export const register: Register = on => {
       // no command list: leave the buttons out
     }
     const pct = usage.percent ?? 0
+    const narrow = e.props.bodyColumns < WIDE_BAND
 
     // One line: each group is its value alone, the limits led by a blue "5h" or "7d"
     const group = (value: RenderElement) => <Text wrap="truncate">{value}</Text>
@@ -283,6 +285,11 @@ export const register: Register = on => {
     if (model) groups.push(group(<Text color="claude">{shortModel(model)}</Text>))
     groups.push(
       group(
+        narrow ? (
+          <Text color={level(pct)} bold>
+            {pct}%
+          </Text>
+        ) : (
         <Text>
           <Text color={level(pct)}>{bar(pct, 8)[0]}</Text>
           <Text dimColor>{bar(pct, 8)[1]}</Text>
@@ -294,7 +301,8 @@ export const register: Register = on => {
             {' '}
             {fmtTokens(usage.tokens ?? 0)}/{fmtTokens(usage.window)}
           </Text>
-        </Text>,
+        </Text>
+        ),
       ),
     )
     for (const l of usage.limits) {
@@ -307,7 +315,7 @@ export const register: Register = on => {
               {l.percentUsed}%
             </Text>
             {/* "↻ 2h11m" rather than "resets 2h 11m": short enough to keep the band on one line */}
-            {reset && <Text dimColor> ↻ {reset}</Text>}
+            {reset && !narrow && <Text dimColor> ↻ {reset}</Text>}
           </Text>,
         ),
       )
@@ -319,15 +327,18 @@ export const register: Register = on => {
     const clock = cacheClock(await read($, lastAtAtom), now)
     if (clock || hit !== undefined) {
       const RoboSvg = e.surface === 'terminal' || !('Svg' in elements) ? undefined : elements.Svg
-      const word = !RoboSvg || e.props.bodyColumns >= WIDE_BAND
+      const word = !RoboSvg || !narrow
+      // narrow, the time goes, unless it is all there is to show yet (no response counted)
+      const time = !narrow || hit === undefined
       const text = (
         <Text wrap="truncate">
           {clock && (
             <Text color={HUE[clock.mode]}>
               {/* warm counts down from the hour in minutes (60m, not 1h0m); cold says how long idle */}
-              {word && <Text bold>{clock.mode} </Text>}
-              {clock.mode === 'warm' ? `${clock.mins}m` : fmtMins(clock.mins)}
-              {hit !== undefined && ' '}
+              {word && <Text bold>{clock.mode}</Text>}
+              {word && time && ' '}
+              {time && (clock.mode === 'warm' ? `${clock.mins}m` : fmtMins(clock.mins))}
+              {(word || time) && hit !== undefined && ' '}
             </Text>
           )}
           {hit !== undefined && (
@@ -371,10 +382,10 @@ export const register: Register = on => {
       groups.push(
         group(
           <Text>
-            <Text>💰 </Text>
-            <Text color="warning" bold>
-              ${usage.cost.toFixed(2)}
-            </Text>
+            {/* narrow, the amount alone */}
+            {!narrow && <Text>💰 </Text>}
+            {/* an estimate at API prices, so it reads quietly: the band's dim grey, not bold */}
+            <Text dimColor>${usage.cost.toFixed(2)}</Text>
           </Text>,
         ),
       )
