@@ -14,6 +14,10 @@ const cacheAtom = atom({ plugin: 'usage-band', key: 'cache' } as const, { read: 
 const lastAtAtom = atom({ plugin: 'usage-band', key: 'lastAt' } as const, 0)
 // the buttons you turned on: none by default, kept across sessions
 const shownButtonsAtom = atom({ plugin: 'usage-band', key: 'shownButtons' } as const, [])
+// the band's layout: auto picks by width, wide or narrow holds whatever the width; kept across sessions
+const LAYOUTS = ['auto', 'wide', 'narrow'] as const
+const AUTO: (typeof LAYOUTS)[number] = 'auto'
+const layoutAtom = atom({ plugin: 'usage-band', key: 'layout' } as const, AUTO)
 
 // The band's buttons by the name /band-usage <button> takes, with the command each opens
 const BUTTONS = [
@@ -27,10 +31,17 @@ const ICON = 16
 const ICON_GREY = '#8B8B95'
 // Robo stands a little taller than the icons, as ribbon's does beside its chip
 const ROBO = 18
-// Cells a full one-line band takes (model, context, 5h, 7d, cache, cost and separators: about 97).
-// Narrower, each group keeps its number alone: context % without its bar and tokens, the limits
-// without their reset, the cache as Robo and its hit % (the word where there is no Robo)
-const WIDE_BAND = 100
+// Cells a full one-line band takes (model, context, 5h, 7d, cache, cost and separators). In the
+// terminal a cell is a character: about 97. The desktop counts cells of about 12 px in its own
+// proportional font: a full band fit on one line at 85, seen live, its text about 78 (84 leaves
+// room for longer values). Narrower, each group keeps its number alone: context % without its bar
+// and tokens, the limits without their reset, the cache as Robo and its hit % (the word where
+// there is no Robo)
+const WIDE_BAND = { terminal: 100, other: 84 }
+const wideFrom = (surface: string) => (surface === 'terminal' ? WIDE_BAND.terminal : WIDE_BAND.other)
+const wideNote = `wide from ${WIDE_BAND.other} cells, ${WIDE_BAND.terminal} in the terminal`
+// The cells each surface last drew the band in and the layout it picked, for /band-usage width
+const drawnAt: Record<string, { columns: number; narrow: boolean }> = {}
 // U+2800 draws nothing yet is not whitespace, so no surface trims it away
 const BLANK = '\u2800'.repeat(2)
 const glyphSvg = (glyph: string) =>
@@ -137,12 +148,15 @@ export const register: Register = on => {
     await $.command.register({
       name: 'band-usage',
       description: 'Show or hide the usage band; open a pane, or turn its button on or off',
-      argumentHint: '[open] flight-recorder | switchboard | hud, or buttons',
+      argumentHint: '[open] flight-recorder | switchboard | hud, buttons, or width [auto | wide | narrow]',
     })
     const saved = await $.store.get('shownButtons')
     if (Array.isArray(saved)) {
       await update($, shownButtonsAtom, () => saved.filter((n): n is string => typeof n === 'string'))
     }
+    const layout = await $.store.get('layout')
+    const kept = LAYOUTS.find(l => l === layout)
+    if (kept) await update($, layoutAtom, () => kept)
     await refresh($)
     const now = await $.clock.now()
     await update($, nowAtom, () => now)
@@ -164,6 +178,23 @@ export const register: Register = on => {
       return { text: hidden ? 'Usage band hidden.' : 'Usage band shown.' }
     }
     const names = BUTTONS.map(b => b.name).join(', ')
+    // width alone says what each surface last drew the band in: the cells it was given and the layout
+    // it used; width auto | wide | narrow sets the layout, auto picking by width
+    if (verb === 'width') {
+      const pick = LAYOUTS.find(l => l === second)
+      if (second !== undefined && !pick) return { text: 'Use /band-usage width, or /band-usage width auto | wide | narrow.' }
+      if (pick) {
+        await update($, layoutAtom, () => pick)
+        await $.store.set('layout', pick)
+        return { text: pick === 'auto' ? `The band picks its layout by width again (${wideNote}).` : `The band stays ${pick}, whatever its width. It stays that way in new sessions.` }
+      }
+      const layout = await read($, layoutAtom)
+      const rows = Object.entries(drawnAt).map(
+        ([surface, d]) => `${surface}: ${d.columns} cells (bodyColumns), ${d.narrow ? 'narrow' : 'wide'} layout`,
+      )
+      const setting = layout === 'auto' ? `Layout: auto (${wideNote}).` : `Layout: ${layout}, set with /band-usage width ${layout}.`
+      return { text: `Usage band width\n${rows.length ? rows.join('\n') : 'The band has not drawn yet.'}\n${setting}` }
+    }
     if (verb === 'buttons') {
       const shownButtons = await read($, shownButtonsAtom)
       let loaded: string[] = []
@@ -203,7 +234,7 @@ export const register: Register = on => {
       await $.store.set('shownButtons', shownButtons)
       return { text: `The ${verb} button is ${shownButtons.includes(verb) ? 'on' : 'off'}. It stays that way in new sessions.` }
     }
-    return { text: `Use /band-usage, /band-usage buttons, /band-usage open <pane>, or /band-usage <button> (${names}).` }
+    return { text: `Use /band-usage, /band-usage buttons, /band-usage width, /band-usage open <pane>, or /band-usage <button> (${names}).` }
   })
 
   on('session.measure', async ($, e, next) => {
@@ -276,7 +307,9 @@ export const register: Register = on => {
       // no command list: leave the buttons out
     }
     const pct = usage.percent ?? 0
-    const narrow = e.props.bodyColumns < WIDE_BAND
+    const layout = await read($, layoutAtom)
+    const narrow = layout === 'narrow' || (layout === 'auto' && e.props.bodyColumns < wideFrom(e.surface))
+    drawnAt[e.surface] = { columns: e.props.bodyColumns, narrow }
 
     // One line: each group is its value alone, the limits led by a blue "5h" or "7d"
     const group = (value: RenderElement) => <Text wrap="truncate">{value}</Text>

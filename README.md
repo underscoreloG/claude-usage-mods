@@ -26,7 +26,7 @@ Commands follow one scheme: `/hud-<name>` opens a pane, `/band-<name>` shows or 
 - **Cache** - Robo, then `warm 54m` (minutes before the prompt cache goes cold) or `cold 2h5m` (how long it has been idle), then the hit rate: the share of this session's input tokens the cache served, every response counted, subagents included. Robo bobs while the cache is warm and sits frozen in ice once it is cold; pressing it opens the `/hud-cache` card. The clock restarts at each main-thread request (subagents keep their own cache), picks up a resumed session's idle time, and starts over on `/clear` and `/compact`. It assumes the 1 hour cache: a session on the 5 minute cache goes cold sooner than it shows.
 - **Cost** - what this session has cost at API prices, after a 💰, in dim grey: an estimate, so it reads quietly.
 
-**Narrow band.** Under 100 cells (the room a full line takes) each section keeps its number alone: the model, context %, `5h` and `7d` %, Robo with the hit %, and the cost without its 💰. The context bar, token counts, reset countdowns and the cache's word and time drop out. The terminal draws no Robo, so there the cache keeps its `warm` or `cold`.
+**Narrow band.** Under 84 cells on desktop, or 100 in the terminal (the room a full line takes: the desktop counts wider cells, in a proportional font), each section keeps its number alone: the model, context %, `5h` and `7d` %, Robo with the hit %, and the cost without its 💰. The context bar, token counts, reset countdowns and the cache's word and time drop out. The terminal draws no Robo, so there the cache keeps its `warm` or `cold`.
 
 The sections are spread evenly with a `│` midway between each pair. Context and limit percentages turn yellow at 50% and red at 80%; the cache hit rate goes the other way: green from 80%, yellow from 50%, red below. The band refreshes while you are idle, so the countdowns stay accurate, and it steps aside when a survey or question takes that spot.
 
@@ -42,6 +42,8 @@ The sections are spread evenly with a `│` midway between each pair. Context an
 | `/band-usage open <pane>` | Opens that pane (`flight-recorder`, `switchboard` or `hud`), with or without its button |
 | `/band-usage <button>` | Turns that button on when off, off when on (`flight-recorder`, `switchboard` or `hud`). Kept in new sessions |
 | `/band-usage buttons` | Lists the buttons, on or off, and which mods aren't loaded |
+| `/band-usage width` | Says how many cells each surface last drew the band in (`bodyColumns`), the layout it used, and the layout setting |
+| `/band-usage width auto\|wide\|narrow` | `wide` or `narrow` holds that layout whatever the width; `auto` picks by width again. Kept in new sessions |
 
 The command's hint lists the names as you type; the slash menu can't autocomplete arguments. Each pane's own command (`/hud-flight-recorder`, `/hud-switchboard`, `/hud-session`) opens it too. On desktop the buttons are 16 px grey icons, and the terminal draws them as glyphs.
 

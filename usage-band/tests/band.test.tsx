@@ -258,6 +258,59 @@ test('/band-usage open <pane> opens it through its command, just after, buttons 
   expect(wrong.text).toMatch(/open <pane> \(flight-recorder, switchboard, hud\)/)
 })
 
+test('/band-usage width says the cells each surface drew the band in and the layout it picked', async ($, on) => {
+  beneath(on)
+  await measure($)
+  // a fresh module has drawn nothing on these surfaces yet only if no earlier test mounted them;
+  // so read what the mounts below leave, not the empty case
+  await $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 59 } })
+  await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 120 } })
+  const out = (await $.command.run({ command: 'band-usage', args: 'width' })).text
+  expect(out).toContain('desktop: 59 cells (bodyColumns), narrow layout')
+  expect(out).toContain('terminal: 120 cells (bodyColumns), wide layout')
+  expect(out).toContain('Layout: auto (wide from 84 cells, 100 in the terminal).')
+})
+
+test('/band-usage width wide | narrow | auto holds a layout whatever the width, kept across sessions', async ($, on) => {
+  mock.store(on, {})
+  beneath(on)
+  await measure($)
+  const words = async (bodyColumns: number) => {
+    const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: { ...PROPS, bodyColumns } })
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    await ui.unmount()
+    return texts.some(t => t.includes('1.0k/200.0k'))
+  }
+  expect((await $.command.run({ command: 'band-usage', args: 'width wide' })).text).toMatch(/stays wide/)
+  expect(await words(59)).toBe(true)
+  await $.command.run({ command: 'band-usage', args: 'width narrow' })
+  expect(await words(140)).toBe(false)
+  expect((await $.command.run({ command: 'band-usage', args: 'width' })).text).toContain('Layout: narrow')
+  await $.command.run({ command: 'band-usage', args: 'width auto' })
+  expect([await words(59), await words(140)]).toEqual([false, true])
+  // the desktop counts wider cells: a full band fits from 84 there, while the terminal needs 100
+  const desk = async (bodyColumns: number) => {
+    const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: { ...PROPS, bodyColumns } })
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    await ui.unmount()
+    return texts.some(t => t.includes('1.0k/200.0k'))
+  }
+  expect([await desk(83), await desk(85), await words(85)]).toEqual([false, true, false])
+  expect((await $.command.run({ command: 'band-usage', args: 'width huge' })).text).toMatch(/width auto \| wide \| narrow/)
+})
+
+test('a layout set with /band-usage width stays in a new session', async ($, on) => {
+  beneath(on)
+  mock.store(on, { layout: 'wide' })
+  mock.clock(on)
+  on('command.register', () => ({ value: undefined }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await measure($)
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 59 } })
+  expect((await ui.findAll({ type: 'Text' })).map(t => t.text).some(t => t.includes('1.0k/200.0k'))).toBe(true)
+})
+
 test('/band-usage open says so when that mod is not loaded', async ($, on) => {
   mock.store(on)
   beneath(on, [] as never)
