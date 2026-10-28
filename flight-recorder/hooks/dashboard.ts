@@ -1,22 +1,25 @@
-// Desktop dashboard: one SVG document built from the recorder's state.
-// Colors and mark specs follow the dataviz reference palette (dark steps,
-// validated: scripts/validate_palette.js "#3987e5,#d95926,#199e70,#9085e9" --mode dark).
+// Desktop dashboard: one SVG document built from the recorder's state, in ribbon's look (the
+// /hud-cache card's warm card, Outfit, uppercase spaced labels). The series colors follow the
+// dataviz reference palette (dark steps, validated on this card's surface:
+// scripts/validate_palette.js "#3987e5,#d95926,#199e70,#9085e9" --mode dark --surface "#24221c").
 import type { Totals, Turn, TurnSummary } from '../types'
+import { SANS } from './font'
 import { MODEL_COLORS, TOOL_COLORS, family, fmtTokens, lastMoment, summarize, toolKind } from './timeline'
 
 const W = 600
 const PAD = 16
-const INK = '#f0efec'
-const INK_2 = '#c3c2b7'
-const MUTED = '#898781'
-const GRID = '#2c2c2a'
-const AXIS = '#383835'
-const TILE = '#222221'
-const RING = 'rgba(255,255,255,0.10)'
-const LIVE = '#0ca30c'
-const BAR = '#3987e5'
+// ribbon's card colours: surface, cream text, muted labels, rules, unlit dots, accents
+const CARD = '#24221c'
+const INK = '#e8e2d2'
+const INK_2 = '#c8c1ae'
+const MUTED = '#8d8775'
+const GRID = '#36332b'
+const AXIS = '#4a463b'
+const ORANGE = '#ff6b1a'
+const CHIP_INK = '#1c1a16'
+const LIVE = '#8fbf7f'
 const TOOL_MARK = '#6f6e69'
-const FONT = 'system-ui,-apple-system,Segoe UI,sans-serif'
+const FONT = "RS,system-ui,'Segoe UI',sans-serif"
 
 export type DashboardInput = { turn: Turn; history: TurnSummary[]; totals: Totals; now: number; live: boolean }
 
@@ -30,23 +33,24 @@ export const fmtDur = (ms: number) => {
 }
 
 function text(x: number, y: number, s: string, size: number, fill: string, extra = ''): string {
-  return `<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" ${extra}>${esc(s)}</text>`
+  return `<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" font-weight="500" ${extra}>${esc(s)}</text>`
 }
 
-function tile(x: number, y: number, w: number, label: string, value: string, sub?: string): string {
+// The card's label: small, bold, uppercase and spaced
+const label = (x: number, y: number, s: string, extra = '') => text(x, y, s.toUpperCase(), 11, MUTED, `font-weight="700" letter-spacing="1.4" ${extra}`)
+const rule = (y: number) => `<rect x="${PAD}" y="${y}" width="${W - 2 * PAD}" height="1" fill="${GRID}"/>`
+
+// A figure as the card draws one: the label over a big number, no box; rules part the tiles
+function tile(x: number, y: number, w: number, name: string, value: string, sub?: string): string {
   return (
-    `<rect x="${x}" y="${y}" width="${w}" height="60" rx="8" fill="${TILE}" stroke="${RING}"/>` +
-    text(x + 12, y + 21, label, 11, MUTED) +
-    text(x + 12, y + 47, value, 20, INK, 'font-weight="600"') +
-    (sub ? text(x + w - 12, y + 47, sub, 11, MUTED, 'text-anchor="end"') : '')
+    label(x, y + 18, name) +
+    text(x, y + 50, value, 26, INK, 'font-weight="600"') +
+    (sub ? text(x + w - 14, y + 50, sub, 11, MUTED, 'text-anchor="end"') : '')
   )
 }
 
 function section(y: number, title: string, note?: string): string {
-  return (
-    text(PAD, y, title, 12, INK_2, 'font-weight="600"') +
-    (note ? text(W - PAD, y, note, 11, MUTED, 'text-anchor="end"') : '')
-  )
+  return rule(y - 22) + label(PAD, y, title) + (note ? text(W - PAD, y, note, 12, MUTED, 'text-anchor="end"') : '')
 }
 
 // Donut segment from angle a0 to a1 (radians, 0 = 12 o'clock, clockwise)
@@ -77,15 +81,23 @@ export function dashboardSvg({ turn, history, totals, now, live }: DashboardInpu
   const t1 = live ? Math.max(now, lastMoment(turn)) : lastMoment(turn)
   let y = 22
 
-  // Header
-  parts.push(text(PAD, y, `Turn ${turn.n}`, 16, INK, 'font-weight="600"'))
+  // Header: the turn as a chip, then whether it records
+  y = 30
+  const chip = `TURN ${turn.n}`
+  const chipW = Math.round(chip.length * 8.6 + 14)
+  parts.push(
+    `<rect x="${PAD}" y="${y - 15}" width="${chipW}" height="21" rx="7" fill="${ORANGE}"/>` +
+      text(PAD + chipW / 2, y, chip, 13, CHIP_INK, 'font-weight="700" letter-spacing="1" text-anchor="middle"'),
+  )
   parts.push(
     live
-      ? `<circle cx="${PAD + 74}" cy="${y - 5}" r="4" fill="${LIVE}"/>` + text(PAD + 84, y, 'Recording', 12, INK_2)
-      : text(PAD + 74, y, 'Idle', 12, MUTED),
+      ? `<circle cx="${PAD + chipW + 14}" cy="${y - 4}" r="4" fill="${LIVE}"/>` + label(PAD + chipW + 24, y, 'Recording')
+      : label(PAD + chipW + 12, y, 'Idle'),
   )
-  parts.push(text(W - PAD, y, 'Flight recorder', 11, MUTED, 'text-anchor="end"'))
+  parts.push(label(W - PAD, y, 'Flight recorder', 'text-anchor="end"'))
   y += 16
+  parts.push(rule(y))
+  y += 8
 
   // KPI tiles, 3 x 2
   const tw = (W - 2 * PAD - 2 * 10) / 3
@@ -98,10 +110,12 @@ export function dashboardSvg({ turn, history, totals, now, live }: DashboardInpu
     ['Tokens', fmtTokens(sum.tokens)],
     ['Cache hit', turn.promptTokens > 0 ? `${Math.round(cache * 100)}%` : '-', 'of prompt tokens'],
   ]
-  tiles.forEach(([label, value, sub], i) => {
-    parts.push(tile(PAD + (i % 3) * (tw + 10), y + Math.floor(i / 3) * 70, tw, label, value, sub))
+  tiles.forEach(([name, value, sub], i) => {
+    parts.push(tile(PAD + (i % 3) * (tw + 10), y + Math.floor(i / 3) * 70, tw, name, value, sub))
   })
-  y += 140 + 22
+  // rules between the columns, as the cache card parts its zones
+  for (const c of [1, 2]) parts.push(`<rect x="${PAD + c * (tw + 10) - 12}" y="${y + 4}" width="1" height="${126}" fill="${GRID}"/>`)
+  y += 140 + 40
 
   // Timeline: one lane per agent, requests colored by model, tool calls as grey ticks under them
   parts.push(section(y, 'Timeline', `${turn.lanes.length} lane${turn.lanes.length > 1 ? 's' : ''}`))
@@ -156,7 +170,7 @@ export function dashboardSvg({ turn, history, totals, now, live }: DashboardInpu
     const anchor = i === 0 ? 'start' : i === ticks ? 'end' : 'middle'
     parts.push(text(x0 + (plotW / ticks) * i, y + 14, fmtDur(t), 10, MUTED, `text-anchor="${anchor}" font-variant-numeric="tabular-nums"`))
   }
-  y += 34
+  y += 38
   // legend (identity never color-alone: names next to swatches)
   let lx = x0
   // only the models this turn used
@@ -197,7 +211,7 @@ export function dashboardSvg({ turn, history, totals, now, live }: DashboardInpu
       parts.push(`<path d="${d}" fill="${MODEL_COLORS[fam] ?? MODEL_COLORS.other}"><title>${esc(tip)}</title></path>`)
       a = a1
     }
-    parts.push(text(cx, cy + 2, fmtTokens(famTotal), 14, INK, 'text-anchor="middle" font-weight="600"'))
+    parts.push(text(cx, cy + 4, fmtTokens(famTotal), 16, INK, 'text-anchor="middle" font-weight="600"'))
     parts.push(text(cx, cy + 16, 'tokens', 10, MUTED, 'text-anchor="middle"'))
     // direct legend with shares
     fams.slice(0, 5).forEach(([fam, v], i) => {
@@ -212,8 +226,9 @@ export function dashboardSvg({ turn, history, totals, now, live }: DashboardInpu
 
   // Top tools (session), single series: one hue
   const toolX = W / 2 + 14
-  parts.push(text(toolX, y, 'Top tools', 12, INK_2, 'font-weight="600"'))
-  parts.push(text(W - PAD, y, 'session', 11, MUTED, 'text-anchor="end"'))
+  parts.push(label(toolX, y, 'Top tools'))
+  parts.push(text(W - PAD, y, 'session', 12, MUTED, 'text-anchor="end"'))
+  parts.push(`<rect x="${toolX - 16}" y="${y - 10}" width="1" height="160" fill="${GRID}"/>`)
   const tools = Object.entries(totals.tools).sort((a, b) => b[1] - a[1]).slice(0, 6)
   const maxTool = tools[0]?.[1] ?? 0
   if (tools.length === 0) {
@@ -229,7 +244,7 @@ export function dashboardSvg({ turn, history, totals, now, live }: DashboardInpu
       parts.push(text(toolX + nameW + (count / maxTool) * barMax + 6, by + 12, String(count), 11, INK, 'font-variant-numeric="tabular-nums"'))
     })
   }
-  y = colTop + 178
+  y = colTop + 196
 
   // Cost per turn: previous turns plus this one, oldest on the left
   const turns = [...history].reverse().concat([{ ...sum, cost: turn.cost }])
@@ -246,14 +261,17 @@ export function dashboardSvg({ turn, history, totals, now, live }: DashboardInpu
     const bh = Math.max(2, (t.cost / maxCost) * (chartH - 14))
     const isNow = i === turns.length - 1
     const tip = `Turn ${t.n}: ${fmtCost(t.cost)}, ${fmtDur(t.seconds * 1000)}, ${t.reqs} requests, ${t.tools} tools, ${fmtTokens(t.tokens)} tokens`
-    parts.push(vbar(bx, base, cw, bh, isNow ? BAR : '#2f5f99', tip))
+    parts.push(vbar(bx, base, cw, bh, isNow ? ORANGE : AXIS, tip))
     parts.push(text(bx + cw / 2, base + 13, `T${t.n}`, 10, isNow ? INK_2 : MUTED, 'text-anchor="middle"'))
     if (isNow || t.cost === maxCost) parts.push(text(bx + cw / 2, base - bh - 4, fmtCost(t.cost), 10, INK, 'text-anchor="middle"'))
   })
-  y = base + 26
+  y = base + 30
 
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}" font-family="${FONT}">` +
+    // Outfit rides along: an Svg is drawn isolated and cannot reach the app's fonts
+    `<style>@font-face{font-family:RS;font-weight:100 900;src:url(data:font/woff2;base64,${SANS}) format('woff2')}</style>` +
+    `<rect width="${W}" height="${y}" rx="14" fill="${CARD}"/>` +
     parts.join('') +
     `</svg>`
   return { svg, width: W, height: y }

@@ -33,7 +33,7 @@ const hidden = atom({ plugin: 'switchboard', key: 'hidden' } as const, [])
 const stubbed = atom({ plugin: 'switchboard', key: 'stubbed' } as const, [])
 
 const STUB = 'switchboard-off.ts'
-const STUB_SOURCE = `// Written by Switchboard: this mod is switched off. /switchboard on <name> restores it.
+const STUB_SOURCE = `// Written by Switchboard: this mod is switched off. /hud-switchboard on <name> restores it.
 export const register = () => {}
 `
 
@@ -76,7 +76,7 @@ export const register: Register = on => {
       }),
     )
 
-    return isRefused ? { refuse: 'switched off in Switchboard (/switchboard)' } : next(e)
+    return isRefused ? { refuse: 'switched off in Switchboard (/hud-switchboard)' } : next(e)
   })
 
   // The hide switch: a hidden mod's panes are not opened.
@@ -85,7 +85,7 @@ export const register: Register = on => {
     if (owner !== SELF && owner !== 'engine') {
       await update($, panes, map => ({ ...map, [e.id]: owner }))
       if ((await read($, hidden)).includes(owner)) {
-        return { deny: `${owner} panels hidden in Switchboard (/switchboard)` }
+        return { deny: `${owner} panels hidden in Switchboard (/hud-switchboard)` }
       }
     }
 
@@ -100,14 +100,14 @@ export const register: Register = on => {
     }
     const { Text } = $.ui.resolve(e)
 
-    return <Text dimColor>Hidden by Switchboard. /switchboard to show {owner} again.</Text>
+    return <Text dimColor>Hidden by Switchboard. /hud-switchboard to show {owner} again.</Text>
   })
 
   // The MCP switch: refuses every call to a switched-off server's tools.
   on('tool.call', async ($, e, next) => {
     const server = serverOf(e.tool)
     if (server !== undefined && (await read($, mcpOff)).includes(server)) {
-      return { deny: `The MCP server ${server} is switched off in Switchboard (/switchboard).` }
+      return { deny: `The MCP server ${server} is switched off in Switchboard (/hud-switchboard).` }
     }
 
     return next(e)
@@ -133,7 +133,7 @@ export const register: Register = on => {
     await scanLoadedMods($)
     await enforceOff($)
     await $.command.register({
-      name: 'switchboard',
+      name: 'hud-switchboard',
       description: 'Switchboard: switch mods, plugins, skills and MCP servers on or off',
       argumentHint: '[on|off|hide|show <mod>]',
       immediate: true,
@@ -142,7 +142,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'switchboard' }, async ($, e) => {
+  on('command.run', { command: 'hud-switchboard' }, async ($, e) => {
     const [verb, name] = e.args.trim().split(/\s+/)
     if (verb && name) {
       const text = await apply($, verb, name)
@@ -171,6 +171,11 @@ export const register: Register = on => {
     const Svg = e.surface === 'terminal' || !('Svg' in elements) ? undefined : elements.Svg
     const current = await read($, tab)
     const problem = await read($, notice)
+    // Off the terminal the pane wears ribbon's card: warm surface, cream titles, muted text;
+    // the terminal keeps its theme's colours
+    const card = Svg !== undefined
+    const ink = card ? RIBBON.text : undefined
+    const muted = card ? RIBBON.muted : undefined
 
     // On a surface with Svg the control is the drawing, pressed through a
     // Button laid over it; the terminal draws the glyph switch instead.
@@ -199,7 +204,7 @@ export const register: Register = on => {
       control(
         key,
         isOn ? `Switch ${name} off` : `Switch ${name} on`,
-        switchSvg(isOn),
+        switchSvg(isOn, card),
         [44, 26],
         isOn
           ? <Text color="success" weight="semibold">━━● ON </Text>
@@ -221,10 +226,10 @@ export const register: Register = on => {
       <Box key={`row-${one.key}`} flexDirection="row" justifyContent="space-between" alignItems="center" marginBottom={1}>
         {/* The text gives way (its summary truncates); the controls keep their size */}
         <Box flexDirection="column" flexShrink={1} minWidth={0}>
-          <Text weight="semibold" dimColor={!one.isOn}>{one.title}</Text>
-          {one.summary !== undefined && <Text dimColor wrap="truncate-end">{one.summary}</Text>}
-          {one.hint !== undefined && <Text dimColor italic>{one.hint}</Text>}
-          {one.status !== undefined && <Text dimColor size="footnote">{one.status}</Text>}
+          <Text weight="semibold" color={one.isOn ? ink : muted} dimColor={!card && !one.isOn}>{one.title}</Text>
+          {one.summary !== undefined && <Text color={muted} dimColor={!card} wrap="truncate-end">{one.summary}</Text>}
+          {one.hint !== undefined && <Text color={card ? RIBBON.yellow : undefined} dimColor={!card} italic>{one.hint}</Text>}
+          {one.status !== undefined && <Text color={muted} dimColor={!card} size="footnote">{one.status}</Text>}
         </Box>
         <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
           {one.extra}
@@ -235,8 +240,9 @@ export const register: Register = on => {
 
     const header = (active: number, total: number, words: [string, string] = ['on', 'off']) => (
       <Box flexDirection="row" justifyContent="flex-end" marginBottom={1}>
-        <Text dimColor>
-          {active} {words[0]} · {total - active} {words[1]}
+        {/* the card's label style: uppercase, bold, muted */}
+        <Text color={muted} dimColor={!card} weight={card ? 'bold' : undefined}>
+          {card ? `${active} ${words[0]} · ${total - active} ${words[1]}`.toUpperCase() : `${active} ${words[0]} · ${total - active} ${words[1]}`}
         </Text>
       </Box>
     )
@@ -341,7 +347,7 @@ export const register: Register = on => {
                 ? control(
                     `panel-${mod.name}`,
                     isShown ? `Hide ${mod.name} panels` : `Show ${mod.name} panels`,
-                    eyeSvg(isShown),
+                    eyeSvg(isShown, card),
                     [28, 26],
                     isShown
                       ? <Text color="suggestion">◉ panels</Text>
@@ -358,7 +364,7 @@ export const register: Register = on => {
     }
 
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" {...(card ? { backgroundColor: RIBBON.card, padding: 2 } : {})}>
         <Box flexDirection="row" columnGap={1} marginBottom={1}>
           {TABS.map(([id, label], index) => (
             <Button
@@ -376,11 +382,14 @@ export const register: Register = on => {
         </Box>
         {problem !== '' && <Text color="warning">{problem}</Text>}
         {await body()}
-        <Text dimColor size="footnote">1-4 switch tabs · Esc closes</Text>
+        <Text color={muted} dimColor={!card} size="footnote">1-4 switch tabs · Esc closes</Text>
       </Box>
     )
   })
 }
+
+// ribbon's card colours (the /hud-cache card): surface, text, labels, unlit, the warm accent
+const RIBBON = { card: '#24221c', text: '#e8e2d2', muted: '#8d8775', empty: '#4a463b', warm: '#cc6363', yellow: '#f5a623' }
 
 // Connectors have a UUID for a server name; show them shorter.
 const serverTitle = (id: string) =>
@@ -393,15 +402,16 @@ const shortDescription = (text: string | undefined) => {
   return first.length > 72 ? `${first.slice(0, 71)}…` : first
 }
 
-const switchSvg = (isOn: boolean) =>
+// On the ribbon card: a warm track with a cream knob when on, an unlit one when off
+const switchSvg = (isOn: boolean, card = false) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="26" viewBox="0 0 44 26">` +
-  `<rect x="1" y="1" width="42" height="24" rx="12" fill="${isOn ? '#30A46C' : '#5B5B66'}"/>` +
-  `<circle cx="${isOn ? 30 : 14}" cy="13" r="10" fill="#FFFFFF"/></svg>`
+  `<rect x="1" y="1" width="42" height="24" rx="12" fill="${card ? (isOn ? RIBBON.warm : RIBBON.empty) : isOn ? '#30A46C' : '#5B5B66'}"/>` +
+  `<circle cx="${isOn ? 30 : 14}" cy="13" r="10" fill="${card ? (isOn ? RIBBON.text : RIBBON.muted) : '#FFFFFF'}"/></svg>`
 
-const eyeSvg = (isShown: boolean) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="26" viewBox="0 0 28 26" fill="none" stroke="#8B8B95" stroke-width="1.5">` +
+const eyeSvg = (isShown: boolean, card = false) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="26" viewBox="0 0 28 26" fill="none" stroke="${card ? RIBBON.muted : '#8B8B95'}" stroke-width="1.5">` +
   `<rect x="1" y="1" width="26" height="24" rx="7"/>` +
-  `<path d="M6 13s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="14" cy="13" r="2" fill="#8B8B95"/>` +
+  `<path d="M6 13s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="14" cy="13" r="2" fill="${card ? RIBBON.muted : '#8B8B95'}"/>` +
   (isShown ? '' : `<line x1="7" y1="20" x2="21" y2="6"/>`) +
   `</svg>`
 

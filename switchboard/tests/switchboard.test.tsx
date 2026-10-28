@@ -16,7 +16,7 @@ const PANE = {
 
 const entry = (name: string) => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false })
 const run = (args: string) => ({
-  command: 'switchboard',
+  command: 'hud-switchboard',
   args,
   origin: { kind: 'composer' as const },
   presentation: { isFullscreen: false, columns: 100 },
@@ -39,7 +39,7 @@ test('off stubs a mod\'s hooks.json, on restores it, switches persist', async ($
       : JSON.stringify({ name: e.path.split('/').at(-3), version: '0.2.0' }),
   }))
   on('fs.write', (_, e) => (files.set(e.path, e.text), { value: undefined }))
-  on('command.register', () => ({ value: { command: 'switchboard' } }))
+  on('command.register', () => ({ value: { command: 'hud-switchboard' } }))
   on('command.list', () => ({ value: [{ name: 'noisy-log', description: 'Opens the log', source: 'plugin', plugin: 'noisy' }] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -136,7 +136,7 @@ test('plugins, skills and MCP tabs switch through the CLI, deny rules and call r
     ],
   }))
   on('tool.call', () => ({ result: {} }))
-  on('command.register', () => ({ value: { command: 'switchboard' } }))
+  on('command.register', () => ({ value: { command: 'hud-switchboard' } }))
   on('command.list', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
