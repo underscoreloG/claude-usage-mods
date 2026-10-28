@@ -106,10 +106,10 @@ function closeSpan(lane: Lane, id: string, end: number): Lane {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'flight-recorder',
+      name: 'hud-flight-recorder',
       description: 'Open the flight recorder pane (live turn timeline)',
     })
-    // no auto-open: the pane opens from usage-band's ✈ button or /flight-recorder; it records either way
+    // no auto-open: the pane opens from usage-band's ✈ button or /hud-flight-recorder; it records either way
 
     // Drive the live clock only while something is running, so idle sessions write nothing.
     $.clock.every(400, () => {
@@ -131,15 +131,15 @@ export const register: Register = on => {
   })
 
   // The ✈ button (usage-band draws it, keyed "flight-recorder"): open the pane here and
-  // take the press, so no /flight-recorder command row lands in the chat. Matched on the
+  // take the press, so no /hud-flight-recorder command row lands in the chat. Matched on the
   // key alone; if opening fails, the button's own fallback (running the command) runs.
   on('ui.press', { element: 'flight-recorder' }, async ($, e) => {
     await $.ui.open({ id: PANE, title: 'Flight recorder' })
     return { element: e.element }
   }).catch(($, e, next) => next(e))
 
-  // /flight-recorder opens the pane; "text" or "dashboard" also picks the desktop view
-  on('command.run', { command: 'flight-recorder' }, async ($, e) => {
+  // /hud-flight-recorder opens the pane; "text" or "dashboard" also picks the desktop view
+  on('command.run', { command: 'hud-flight-recorder' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
     if (arg === 'text' || arg === 'dashboard') await update($, modeAtom, () => arg)
     await $.ui.open({ id: PANE, title: 'Flight recorder' })

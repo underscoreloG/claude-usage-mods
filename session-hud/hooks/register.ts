@@ -1,7 +1,11 @@
-// session-hud: the /hud dashboard pane from StackSprint's session-guard 0.1.2 (MIT, see LICENSE),
+// session-hud: the /hud-session dashboard pane from StackSprint's session-guard 0.1.2 (MIT, see LICENSE),
 // without the status band, budget guard or recording mode. It only observes and draws: no tool call
 // or prompt is ever changed or refused.
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
+
+import { MODELS, TTL_MIN, TTL_MS, cardSvg, costOf, familyOf, fmtIdle, tok, usd } from './cache-art'
+import type { CacheView } from './cache-art'
+import { hudSvg } from './hud-art'
 
 // The engine has Uint8Array.toBase64; the es2023 lib doesn't declare it
 declare global {
@@ -19,6 +23,10 @@ const SECRETS: [RegExp, string][] = [
 ]
 
 const PANE = 'session-hud'
+// The prompt cache card, ribbon's drawing in a pane of its own: /hud-cache, or Robo in usage-band
+const CACHE_PANE = 'hud-cache'
+// The card's drawing width in pixels: ribbon's two-row layout, scaled to the pane
+const CARD_W = 640
 const SPARK = '▁▂▃▄▅▆▇█'
 
 // The dashboard's palette, as 0xRRGGBB
@@ -63,6 +71,22 @@ const turnCosts: number[] = []
 let now = 'idle'
 let cwd = ''
 let turnStartCost = 0
+// When the main thread last sent a request, which keeps the prompt cache warm; 0 before the first
+let lastAt = 0
+
+/** What the cache card reads, or null until a request and the context size are known. */
+export function cacheView(last: number, now: number, tokens: number, window: number, model: string): CacheView | null {
+  if (last <= 0 || tokens <= 0) return null
+  const idleMs = Math.max(0, now - last)
+  return {
+    mode: idleMs >= TTL_MS ? 'cold' : 'warm',
+    idle: fmtIdle(idleMs),
+    idleMin: Math.floor(idleMs / 60000),
+    tokens,
+    window,
+    mine: familyOf(model),
+  }
+}
 
 async function costNow($: EngineInterface): Promise<number> {
   const usage = await $.session.usage()
@@ -72,8 +96,28 @@ async function costNow($: EngineInterface): Promise<number> {
 export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     cwd = await $.session.cwd()
-    await $.command.register({ name: 'hud', description: 'Open the session dashboard', immediate: true })
+    await $.command.register({ name: 'hud-session', description: 'Open the session dashboard', immediate: true })
+    await $.command.register({ name: 'hud-cache', description: 'Open the prompt cache card: warm or cold, size, next message cost', immediate: true })
+    // keeps the cache card's countdown and its warm-to-cold flip current
+    $.clock.every(30_000, () => $.ui.invalidate('ui.render'))
     return next(e)
+  })
+
+  // A resumed or forked session knows how long it was away; a cleared or compacted one starts a new cache
+  on('classic.SessionStart', async ($, e, next) => {
+    const r = await next(e)
+    if (e.source === 'clear' || e.source === 'compact') lastAt = 0
+    else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
+      lastAt = (await $.clock.now()) - e.seconds_since_last_response * 1000
+    }
+    return r
+  }).catch(($, e, next) => next(e))
+
+  // Each main-thread request reads or writes the cache, so its start resets the hour; a subagent's
+  // prompt is its own
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId === undefined) lastAt = await $.clock.now()
+    return yield* next(e)
   })
 
   // ---------- OBSERVE: what Claude is doing ----------
@@ -107,13 +151,55 @@ export const register: Register = (on) => {
     return next(e)
   })
 
-  // ---------- DRAW: the /hud dashboard pane ----------
-  on('command.run', { command: 'hud' }, async ($) => {
+  // ---------- DRAW: the /hud-session dashboard pane ----------
+  on('command.run', { command: 'hud-session' }, async ($) => {
     await $.ui.open({ id: PANE, title: 'Session HUD', closeOnEscape: true })
     return {}
   })
 
-  // usage-band's HUD button: opens the pane straight from the press, so no /hud shows in the
+  on('command.run', { command: 'hud-cache' }, async ($) => {
+    await $.ui.open({ id: CACHE_PANE, title: 'Prompt cache', closeOnEscape: true })
+    return {}
+  })
+
+  // usage-band's Robo opens the cache card the same way its HUD button opens the HUD
+  on('ui.press', { plugin: 'usage-band', element: 'cache' }, async ($, e) => {
+    await $.ui.open({ id: CACHE_PANE, title: 'Prompt cache', closeOnEscape: true })
+    return { element: e.element }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: CACHE_PANE }, async ($, e) => {
+    const els = $.ui.resolve(e)
+    const { Box, Text } = els
+    const Svg = e.surface !== 'terminal' && 'Svg' in els ? els.Svg : undefined
+    const usage = await $.session.usage()
+    const view = cacheView(lastAt, await $.clock.now(), usage.context.tokens ?? 0, usage.context.window, await $.session.model())
+    const note = Text({ color: hex(C.dim), children: ['List-price estimates; assumes the 1h cache, a 5m one goes cold sooner.'] })
+    if (!view) return Box({ flexDirection: 'column', paddingX: 1, children: [Text({ color: hex(C.dim), children: ['The cache shows after the first reply.'] })] })
+    const cold = view.mode === 'cold'
+    if (Svg) {
+      // No width or height: the drawing scales to the pane. Interactive, so Robo bobs and the ice twinkles
+      const card = cardSvg(view, 'stacked', CARD_W)
+      return Box({ flexDirection: 'column', gap: 1, children: [Svg({ source: card.source, alt: card.alt, isInteractive: true }), note] })
+    }
+    // The terminal gets the same facts as text
+    const prices = MODELS.map((m) => m.NAME + ' ' + usd(costOf(m, view.mode, view.tokens)) + (m.id === view.mine ? ' (you)' : '')).join('  ')
+    return Box({
+      flexDirection: 'column',
+      paddingX: 1,
+      children: [
+        Text({ children: [
+          Text({ color: cold ? '#6aaabd' : '#cc6363', bold: true, children: [cold ? 'COLD' : 'WARM'] }),
+          Text({ color: hex(C.dim), children: ['  idle ' + view.idle + (cold ? '' : '  ·  cold in ' + Math.max(0, TTL_MIN - view.idleMin) + 'm')] }),
+        ] }),
+        Text({ children: [tok(view.tokens) + ' tokens ' + (cold ? 'to re-cache' : 'in cache') + (view.window ? '  ·  ' + Math.round((view.tokens / view.window) * 100) + '% of ' + tok(view.window) : '')] }),
+        Text({ children: [Text({ color: hex(C.dim), children: ['next message  '] }), prices] }),
+        note,
+      ],
+    })
+  })
+
+  // usage-band's HUD button: opens the pane straight from the press, so no /hud-session shows in the
   // transcript, and takes the press (as Switchboard does for the band's gear)
   on('ui.press', { plugin: 'usage-band', element: 'session-hud' }, async ($, e) => {
     await $.ui.open({ id: PANE, title: 'Session HUD', closeOnEscape: true })
@@ -131,22 +217,31 @@ export const register: Register = (on) => {
     const model = await $.session.model()
     const ctx = (usage.context.percent ?? 0) / 100
     const cost = usage.cost ? usage.cost.usd : 0
+
+    // Off the terminal the dashboard is one drawing in ribbon's look, scaled to the pane (no width or height)
+    if (Svg) {
+      const card = hudSvg({
+        model: prettyModel(model),
+        turns: turnCosts,
+        ctxShare: ctx,
+        tokens: usage.context.tokens ?? Math.round(ctx * usage.context.window),
+        window: usage.context.window,
+        cost,
+        tools: Object.entries(tools).sort((a, b) => b[1] - a[1]),
+        files: Object.entries(files),
+        now,
+      })
+      return Svg({ source: card.source, alt: card.alt })
+    }
+
     const W = Math.max(40, e.props.bodyColumns ?? 60)
     const half = Math.floor((W - 1) / 2)
     // A cell width only fits the terminal; elsewhere a card fills the pane
     const full = Raster ? W : undefined
 
-    // A slim meter: a colored line over a dark track (a Raster in the terminal, an Svg sized to the pane
-    // on desktop and mobile, text elsewhere)
+    // A slim meter: a colored line over a dark track (a Raster in the terminal, text elsewhere)
     const meter = (key: string, share: number, width: number, color: number) => {
       const filled = Math.max(0, Math.min(width, Math.round(share * width)))
-      if (Svg) {
-        const px = Math.round(Math.max(0, Math.min(1, share)) * 1000)
-        const source = '<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="8" viewBox="0 0 1000 8">'
-          + '<rect width="1000" height="8" rx="4" fill="' + hex(C.track) + '"/>'
-          + '<rect width="' + px + '" height="8" rx="4" fill="' + hex(color) + '"/></svg>'
-        return Box({ flexGrow: 1, children: [Svg({ source, alt: Math.round(share * 100) + '%' })] })
-      }
       if (!Raster) {
         return Text({ children: [Text({ color: hex(color), children: ['▆'.repeat(filled)] }), Text({ color: hex(C.track), children: ['▆'.repeat(width - filled)] })] })
       }
@@ -226,20 +321,6 @@ export const register: Register = (on) => {
         children: [
           Raster
             ? Raster({ key: 'turns', columns: bottom.length, rows: 2, cells: cells([...top_, ...bottom]) })
-            : Svg
-            // The same bars in pixels: 12 wide, 4 apart, up to 32 tall. Width and height are set:
-            // left out, the desktop scales the drawing up to the card's width, and one bar fills it
-            ? Svg({
-                alt: shown.length + ' turns',
-                width: shown.length * 16,
-                height: 32,
-                source: '<svg xmlns="http://www.w3.org/2000/svg" width="' + shown.length * 16 + '" height="32" viewBox="0 0 ' + shown.length * 16 + ' 32">'
-                  + shown.map((v, i) => {
-                    const h = Math.max(2, Math.round((v / top) * 32))
-                    return '<rect x="' + i * 16 + '" y="' + (32 - h) + '" width="12" height="' + h + '" rx="2" fill="' + hex(shade(C.amber, v / top)) + '"/>'
-                  }).join('')
-                  + '</svg>',
-              })
             : Text({ color: hex(C.amber), children: [bottom.map((b) => b[0]).join('')] }),
           Text({ color: hex(C.dim), children: ['last $' + (shown[shown.length - 1] ?? 0).toFixed(3) + ' · avg $' + avg.toFixed(3)] }),
         ],

@@ -4,11 +4,13 @@ Five Claude Code mods for keeping an eye on usage, cost, subagents and backgroun
 
 | Mod | What it does | Toggle |
 |---|---|---|
-| `usage-band` | One-line band above the prompt: model, context fill, rate limits, cache hit, cost, optional buttons for the panes | `/usageband` |
-| `agents-band` | Live rows for subagents, background shells and monitors, and linked sessions, stacked above the usage band | `/agentsband` |
-| `flight-recorder` | Pane with a live timeline of each turn, per lane (main + subagents) | `/flight-recorder` |
-| `switchboard` | Pane with on/off switches for mods, plugins, skills and MCP servers | `/switchboard` |
-| `session-hud` | Pane with session cards: context, cost, cost per turn, tools used, files changed, what runs now | `/hud` |
+| `usage-band` | One-line band above the prompt: model, context fill, rate limits, cache warm/cold with time left and hit rate, cost, optional buttons for the panes | `/band-usage` |
+| `agents-band` | Live rows for subagents, background shells and monitors, and linked sessions, stacked above the usage band | `/band-agents` |
+| `flight-recorder` | Pane with a live timeline of each turn, per lane (main + subagents) | `/hud-flight-recorder` |
+| `switchboard` | Pane with on/off switches for mods, plugins, skills and MCP servers | `/hud-switchboard` |
+| `session-hud` | Pane with session cards: context, cost, cost per turn, tools used, files changed, what runs now; and the prompt cache card (warm or cold, size, next message cost) | `/hud-session`, `/hud-cache` |
+
+Commands follow one scheme: `/hud-<name>` opens a pane, `/band-<name>` shows or hides a band.
 
 ## usage-band and agents-band
 
@@ -32,12 +34,12 @@ The sections are spread evenly with a `│` midway between each pair. Context an
 
 | Command | What it does |
 |---|---|
-| `/usageband` | Hides or shows the whole band |
-| `/usageband open <pane>` | Opens that pane (`flight-recorder`, `switchboard` or `hud`), with or without its button |
-| `/usageband <button>` | Turns that button on when off, off when on (`flight-recorder`, `switchboard` or `hud`). Kept in new sessions |
-| `/usageband buttons` | Lists the buttons, on or off, and which mods aren't loaded |
+| `/band-usage` | Hides or shows the whole band |
+| `/band-usage open <pane>` | Opens that pane (`flight-recorder`, `switchboard` or `hud`), with or without its button |
+| `/band-usage <button>` | Turns that button on when off, off when on (`flight-recorder`, `switchboard` or `hud`). Kept in new sessions |
+| `/band-usage buttons` | Lists the buttons, on or off, and which mods aren't loaded |
 
-The command's hint lists the names as you type; the slash menu can't autocomplete arguments. Each pane's own command (`/flight-recorder`, `/switchboard`, `/hud`) opens it too. On desktop the buttons are 16 px grey icons, and the terminal draws them as glyphs.
+The command's hint lists the names as you type; the slash menu can't autocomplete arguments. Each pane's own command (`/hud-flight-recorder`, `/hud-switchboard`, `/hud-session`) opens it too. On desktop the buttons are 16 px grey icons, and the terminal draws them as glyphs.
 
 **agents-band** is the top block. It appears only while there is something to show (subagents, background tasks or linked sessions), so it costs no space the rest of the time. Each subagent row shows:
 
@@ -66,7 +68,7 @@ The data comes from the desktop app's `ccd_session_mgmt` MCP server (`list_sessi
 
 ## flight-recorder
 
-![flight-recorder pane, text view, showing one turn with the main lane and two subagent lanes](docs/flight-recorder.png)
+![flight-recorder pane, text view, showing one turn with the main lane and two subagent lanes](docs/hud-flight-recorder.png)
 
 A side pane that records what happens inside each turn, so you can see where time and tokens went:
 
@@ -77,7 +79,7 @@ A side pane that records what happens inside each turn, so you can see where tim
 
 In the screenshot, main (opus) used 92% of the tokens for the turn and the two sonnet subagents only 8%. A spend split like that is the thing this pane makes easy to see.
 
-Two views: **Text** (default, works in the terminal too) and **Dashboard** (SVG charts: cost per turn, tokens by model, top tools; desktop only). `/flight-recorder text` or `/flight-recorder dashboard` opens the pane on that view. Earlier turns are kept below the current one.
+Two views: **Text** (default, works in the terminal too) and **Dashboard** (SVG charts: cost per turn, tokens by model, top tools; desktop only). `/hud-flight-recorder text` or `/hud-flight-recorder dashboard` opens the pane on that view. Earlier turns are kept below the current one.
 
 ## switchboard
 
@@ -94,13 +96,13 @@ A side pane with an on/off switch for everything loaded into a session, in four 
 - The first time it edits `~/.claude/settings.json` it keeps the original as `settings.json.switchboard-backup`.
 - A blocked skill stays in Claude's list; calls to it are refused. A switched-off MCP server's tools are still listed, marked off.
 - On desktop the switches are drawn as SVG pills; the terminal gets `━━● ON` / `○── OFF`.
-- `/switchboard on|off|hide|show <mod>` does the same from the prompt.
+- `/hud-switchboard on|off|hide|show <mod>` does the same from the prompt.
 
 ## session-hud
 
 ![session-hud pane on desktop after a turn of work: context, cost, cost per turn, tools, files changed, now](docs/session-hud.png)
 
-A side pane with one card per question, opened with `/hud` or the band's HUD button (Esc closes it). The button opens it with no `/hud` line in the transcript:
+A side pane with one card per question, opened with `/hud-session` or the band's HUD button (Esc closes it). The button opens it with no `/hud-session` line in the transcript:
 
 - **Context** - percent and tokens used of the window, with a meter that turns amber at 60% and red at 85%.
 - **Cost** - what this session has cost, and what the last turn cost.
@@ -113,7 +115,7 @@ It only observes and draws: no tool call or prompt is changed or refused. Counte
 
 Desktop and mobile get cards that fill the pane, SVG bars and a gap between cards; on a narrow pane Context and Cost stack. The terminal gets fixed-width cards and `Raster` bars. The layout is picked by `e.surface`, not by which elements the surface offers, since the desktop table carries `Raster` too.
 
-Trimmed from the `/hud` dashboard of StackSprint's [session-guard](https://github.com/stacksprint-io/claude-code-playbook/tree/main/mods/session-guard) 0.1.2 (MIT, see `session-hud/LICENSE`), without its status band, budget guard and recording mode.
+Trimmed from the `/hud-session` dashboard of StackSprint's [session-guard](https://github.com/stacksprint-io/claude-code-playbook/tree/main/mods/session-guard) 0.1.2 (MIT, see `session-hud/LICENSE`), without its status band, budget guard and recording mode.
 
 ## Install
 
@@ -123,7 +125,7 @@ Trimmed from the `/hud` dashboard of StackSprint's [session-guard](https://githu
 ```json
 {
   "env": {
-    "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/usage-band:/path/to/agents-band:/path/to/flight-recorder:/path/to/switchboard:/path/to/session-hud"
+    "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/usage-band:/path/to/agents-band:/path/to/hud-flight-recorder:/path/to/hud-switchboard:/path/to/session-hud"
   }
 }
 ```

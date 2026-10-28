@@ -68,7 +68,7 @@ test('records main + subagent lanes, requests, tools and cost', async ($, on) =>
   expect(svgEl?.props.isInteractive).toBe(true)
   expect(String(svgEl?.props.alt)).toContain('Turn 1: $0.500, 2 requests, 1 tool calls')
   expect(svg).toContain('Turn 1')
-  expect(svg).toContain('Tokens by model')
+  expect(svg).toContain('TOKENS BY MODEL') // the card's labels are uppercase
   // hovering the Read tick shows the file it read; a request shows tokens and cache
   expect(svg).toMatch(/<title>Read · [^<]*main\na\.txt<\/title>/)
   expect(svg).toMatch(/<title>claude-opus-5-5 · [^<]*\n9\.5k in \(84% cached\)/)
@@ -169,15 +169,15 @@ test('desktop opens on the live text view, with a Text | Dashboard toggle', asyn
   expect(await term.find({ type: 'Button' })).toBeUndefined()
 })
 
-test('/flight-recorder dashboard and text switch the desktop view', async ($, on) => {
+test('/hud-flight-recorder dashboard and text switch the desktop view', async ($, on) => {
   mock.clock(on)
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [], cost: { usd: 0 } } }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   await $.turn.start({ text: 'hi', turnId: 't1' })
-  expect((await $.command.run({ command: 'flight-recorder', args: 'dashboard' } as never)).text).toBe('Flight recorder opened (dashboard view).')
+  expect((await $.command.run({ command: 'hud-flight-recorder', args: 'dashboard' } as never)).text).toBe('Flight recorder opened (dashboard view).')
   const desk = await $.ui.mount({ plugin: 'flight-recorder', surface: 'desktop', component: 'Pane', requestId: 'flight-recorder', props: PANE_PROPS })
   expect(await desk.find({ type: 'Svg' })).toBeDefined()
-  await $.command.run({ command: 'flight-recorder', args: 'text' } as never)
+  await $.command.run({ command: 'hud-flight-recorder', args: 'text' } as never)
   expect(await desk.find({ type: 'Svg' })).toBeUndefined()
 })

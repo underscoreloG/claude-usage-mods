@@ -78,7 +78,7 @@ async function track($: EngineInterface, tool: 'Bash' | 'Monitor', label: string
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'agentsband',
+      name: 'band-agents',
       description: 'Show or hide the subagent, background task and linked-session rows above the prompt',
     })
     // live spinner and timers, only while something on screen moves
@@ -103,7 +103,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'agentsband' }, async $ => {
+  on('command.run', { command: 'band-agents' }, async $ => {
     const hidden = await update($, hiddenAtom, x => !x)
     return { text: hidden ? 'Subagent, background and session rows hidden.' : 'Subagent, background and session rows shown.' }
   })

@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, SessionUsage } from 'claude-code'
 
 import type { Snapshot } from '../types'
+import { HUE, roboSvg } from './robo'
 
 const usageAtom = atom({ plugin: 'usage-band', key: 'usage' } as const, null)
 const modelAtom = atom({ plugin: 'usage-band', key: 'model' } as const, null)
@@ -9,19 +10,23 @@ const nowAtom = atom({ plugin: 'usage-band', key: 'now' } as const, 0)
 const hiddenAtom = atom({ plugin: 'usage-band', key: 'isHidden' } as const, false)
 // input tokens this session, and how many of them the prompt cache served
 const cacheAtom = atom({ plugin: 'usage-band', key: 'cache' } as const, { read: 0, total: 0 })
+// when the main thread last sent a request, which keeps the prompt cache warm; 0 before the first
+const lastAtAtom = atom({ plugin: 'usage-band', key: 'lastAt' } as const, 0)
 // the buttons you turned on: none by default, kept across sessions
 const shownButtonsAtom = atom({ plugin: 'usage-band', key: 'shownButtons' } as const, [])
 
-// The band's buttons by the name /usageband <button> takes, with the command each opens
+// The band's buttons by the name /band-usage <button> takes, with the command each opens
 const BUTTONS = [
-  { name: 'flight-recorder', command: 'flight-recorder' },
-  { name: 'switchboard', command: 'switchboard' },
-  { name: 'hud', command: 'hud' },
+  { name: 'flight-recorder', command: 'hud-flight-recorder' },
+  { name: 'switchboard', command: 'hud-switchboard' },
+  { name: 'hud', command: 'hud-session' },
 ] as const
 
 // The band's icons off the terminal: one size and one grey, which reads on light and dark
 const ICON = 16
 const ICON_GREY = '#8B8B95'
+// Robo stands a little taller than the icons, as ribbon's does beside its chip
+const ROBO = 18
 // U+2800 draws nothing yet is not whitespace, so no surface trims it away
 const BLANK = '\u2800'.repeat(2)
 const glyphSvg = (glyph: string) =>
@@ -65,14 +70,28 @@ export function untilReset(resetsAt: string | undefined, now: number): string | 
   if (!resetsAt || !now) return undefined
   const ms = Date.parse(resetsAt) - now
   if (!Number.isFinite(ms) || ms <= 0) return undefined
-  const mins = Math.round(ms / 60000)
+  return fmtMins(Math.round(ms / 60000))
+}
+
+// no space inside, so a countdown stays short beside the buttons: 2h11m, 2d9h
+export function fmtMins(mins: number): string {
   const d = Math.floor(mins / 1440)
   const h = Math.floor((mins % 1440) / 60)
   const m = mins % 60
-  // no space inside, so the countdown stays short beside the buttons: 2h11m, 2d9h
   if (d > 0) return `${d}d${h}h`
   if (h > 0) return `${h}h${m}m`
   return `${m}m`
+}
+
+// The prompt cache lives an hour after the last request that read or wrote it (Claude Code's 1h
+// TTL; a session on the 5-minute cache goes cold sooner than this shows)
+export const CACHE_TTL_MIN = 60
+
+// Warm with the minutes left, or cold with the minutes idle; undefined before the first request
+export function cacheClock(lastAt: number, now: number): { mode: 'warm' | 'cold'; mins: number } | undefined {
+  if (lastAt <= 0) return undefined
+  const idle = Math.max(0, Math.floor((now - lastAt) / 60000))
+  return idle < CACHE_TTL_MIN ? { mode: 'warm', mins: CACHE_TTL_MIN - idle } : { mode: 'cold', mins: idle }
 }
 
 // The share of input the cache served, in percent; undefined before the first response
@@ -112,7 +131,7 @@ async function refresh($: EngineInterface): Promise<void> {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'usageband',
+      name: 'band-usage',
       description: 'Show or hide the usage band; open a pane, or turn its button on or off',
       argumentHint: '[open] flight-recorder | switchboard | hud, or buttons',
     })
@@ -133,7 +152,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'usageband' }, async ($, e) => {
+  on('command.run', { command: 'band-usage' }, async ($, e) => {
     const [first = '', second] = e.args.trim().split(/\s+/)
     const verb = first
     if (!verb) {
@@ -152,14 +171,14 @@ export const register: Register = on => {
       const rows = BUTTONS.map(
         b => `${b.name}: ${shownButtons.includes(b.name) ? 'on' : 'off'}${loaded.includes(b.command) ? '' : ' (mod not loaded)'}`,
       )
-      return { text: `Usage band buttons\n${rows.join('\n')}\nTurn one on or off with /usageband <button>.` }
+      return { text: `Usage band buttons\n${rows.join('\n')}\nTurn one on or off with /band-usage <button>.` }
     }
     // open <name> opens that pane, as its button would: its command runs through the command
     // chain, not the prompt, so no second line lands in the transcript. A command can't run another
     // from inside its own hook (it would wait on the turn this one holds), so it runs just after.
     if (verb === 'open') {
       const target = BUTTONS.find(b => b.name === second)
-      if (!target) return { text: `Use /usageband open <pane> (${names}).` }
+      if (!target) return { text: `Use /band-usage open <pane> (${names}).` }
       let loaded = true
       try {
         loaded = (await $.command.list()).some(c => c.name === target.command)
@@ -180,7 +199,7 @@ export const register: Register = on => {
       await $.store.set('shownButtons', shownButtons)
       return { text: `The ${verb} button is ${shownButtons.includes(verb) ? 'on' : 'off'}. It stays that way in new sessions.` }
     }
-    return { text: `Use /usageband, /usageband buttons, /usageband open <pane>, or /usageband <button> (${names}).` }
+    return { text: `Use /band-usage, /band-usage buttons, /band-usage open <pane>, or /band-usage <button> (${names}).` }
   })
 
   on('session.measure', async ($, e, next) => {
@@ -190,7 +209,28 @@ export const register: Register = on => {
 
   // session.measure fires after main turns only; refresh after every response so
   // cost and limits move while subagents are still working.
+  // A resumed or forked session knows how long it was away; a cleared or compacted one starts a new cache
+  on('classic.SessionStart', async ($, e, next) => {
+    const r = await next(e)
+    if (e.source === 'clear' || e.source === 'compact') {
+      await update($, lastAtAtom, () => 0)
+    } else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
+      const now = await $.clock.now()
+      const lastAt = now - e.seconds_since_last_response * 1000
+      await update($, lastAtAtom, () => lastAt)
+      await update($, nowAtom, () => now)
+    }
+    return r
+  }).catch(($, e, next) => next(e)) // a band that fails to seed never holds up the session
+
   on('turn.step', async function* ($, e, next) {
+    // each main-thread request reads or writes the cache, so its start resets the hour;
+    // a subagent's prompt is its own and keeps no cache of the conversation's
+    if (e.agentId === undefined) {
+      const t = await $.clock.now()
+      await update($, lastAtAtom, () => t)
+      await update($, nowAtom, () => t)
+    }
     const result = yield* next(e)
     // every response counts toward the cache hit rate, subagents' too: they are billed alike
     const u = result.usage
@@ -222,12 +262,12 @@ export const register: Register = on => {
     let hasHud = false
     try {
       const commands = await $.command.list()
-      // a button shows once you turned it on with /usageband show, and only while its mod is loaded
+      // a button shows once you turned it on with /band-usage show, and only while its mod is loaded
       const shownButtons = await read($, shownButtonsAtom)
       const shows = (name: string, command: string) => shownButtons.includes(name) && commands.some(c => c.name === command)
-      hasFlight = shows('flight-recorder', 'flight-recorder')
-      hasSwitchboard = shows('switchboard', 'switchboard')
-      hasHud = shows('hud', 'hud')
+      hasFlight = shows('flight-recorder', 'hud-flight-recorder')
+      hasSwitchboard = shows('switchboard', 'hud-switchboard')
+      hasHud = shows('hud', 'hud-session')
     } catch {
       // no command list: leave the buttons out
     }
@@ -269,15 +309,55 @@ export const register: Register = on => {
         ),
       )
     }
+    // The cache: Robo, warm with the minutes left or cold with the time idle, then the hit rate.
+    // Off the terminal Robo opens the /hud-cache card, as ribbon's Show does.
     const cache = await read($, cacheAtom)
     const hit = cacheHit(cache.read, cache.total)
-    if (hit !== undefined) {
+    const clock = cacheClock(await read($, lastAtAtom), now)
+    if (clock || hit !== undefined) {
+      const text = (
+        <Text wrap="truncate">
+          {clock && (
+            <Text color={HUE[clock.mode]}>
+              <Text bold>{clock.mode}</Text> {fmtMins(clock.mins)}
+              {hit !== undefined && ' '}
+            </Text>
+          )}
+          {hit !== undefined && (
+            <Text color={hitLevel(hit)} bold>
+              {hit}%
+            </Text>
+          )}
+        </Text>
+      )
+      const RoboSvg = e.surface === 'terminal' || !('Svg' in elements) ? undefined : elements.Svg
       groups.push(
-        group(
-          <Text color={hitLevel(hit)}>
-            <Text bold>{hit}%</Text>
-            <Text> hit</Text>
-          </Text>,
+        clock && RoboSvg ? (
+          <Box flexDirection="row" alignItems="center" gap={1}>
+            <Box key="cache-site" position="relative">
+              {/* interactive, so the SMIL bob and blink run; the Button laid over it takes the press */}
+              <RoboSvg source={roboSvg(clock.mode, ROBO)} alt={clock.mode === 'warm' ? 'Robo, bobbing' : 'Robo, frozen'} width={ROBO} height={ROBO} isInteractive />
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                {/* session-hud's ui.press hook opens the card and takes the press; this runs only when it did not */}
+                <Button
+                  key="cache"
+                  plain
+                  onPress={async () => {
+                    try {
+                      await $.command.run({ command: 'hud-cache' })
+                    } catch {
+                      $.ui.toast('The session-hud mod is not loaded.')
+                    }
+                  }}
+                >
+                  {BLANK}
+                </Button>
+              </Box>
+            </Box>
+            {text}
+          </Box>
+        ) : (
+          text
         ),
       )
     }
@@ -320,7 +400,7 @@ export const register: Register = on => {
       buttons.push(
         button('flight-recorder', 'Open the flight recorder', '✈', glyphSvg('✈'), async () => {
           try {
-            await $.command.run({ command: 'flight-recorder' })
+            await $.command.run({ command: 'hud-flight-recorder' })
           } catch {
             $.ui.toast('The flight-recorder mod is not loaded.')
           }
@@ -332,17 +412,17 @@ export const register: Register = on => {
     if (hasSwitchboard) {
       buttons.push(
         button('switchboard', 'Open Switchboard', '⚙️', glyphSvg('⚙'), () =>
-          $.ui.toast('Switchboard did not answer: run /switchboard.'),
+          $.ui.toast('Switchboard did not answer: run /hud-switchboard.'),
         ),
       )
     }
-    // session-hud's ui.press hook opens its pane and takes the press, so no /hud shows in the
+    // session-hud's ui.press hook opens its pane and takes the press, so no /hud-session shows in the
     // transcript; running the command is the fallback when that hook did not answer.
     if (hasHud) {
       buttons.push(
         button('session-hud', 'Open the session HUD', '◆', GAUGE_SVG, async () => {
           try {
-            await $.command.run({ command: 'hud' })
+            await $.command.run({ command: 'hud-session' })
           } catch {
             $.ui.toast('The session-hud mod is not loaded.')
           }

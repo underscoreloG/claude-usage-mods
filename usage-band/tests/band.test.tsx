@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { cacheHit, hitLevel, untilReset } from '../hooks/register'
+import { cacheClock, cacheHit, fmtMins, hitLevel, untilReset } from '../hooks/register'
 
 const PROPS = {
   hasSurvey: false,
@@ -12,9 +12,9 @@ const PROPS = {
 }
 
 const ALL_THREE = [
-  { name: 'flight-recorder', description: 'Open the flight recorder pane' },
-  { name: 'switchboard', description: 'Switchboard' },
-  { name: 'hud', description: 'Open the session dashboard' },
+  { name: 'hud-flight-recorder', description: 'Open the flight recorder pane' },
+  { name: 'hud-switchboard', description: 'Switchboard' },
+  { name: 'hud-session', description: 'Open the session dashboard' },
 ] as never
 
 // What every band test needs beneath the mod: a measure, a command list, and a band drawn below
@@ -28,8 +28,8 @@ function beneath(on, commands = ALL_THREE) {
 }
 
 const measure = $ => $.session.measure({ context: { tokens: 1000, window: 200_000, percent: 1 }, rateLimits: [], changed: ['context'] })
-// /usageband <button> turns that button on when off, off when on
-const toggle = ($, button: string) => $.command.run({ command: 'usageband', args: button })
+// /band-usage <button> turns that button on when off, off when on
+const toggle = ($, button: string) => $.command.run({ command: 'band-usage', args: button })
 
 test('band is one line: model, context, limits, cache hit, cost, in that order, with separators and no labels', async ($, on) => {
   on('session.measure', (_$, e) => ({ changed: e.changed }))
@@ -133,7 +133,7 @@ test('Flight recorder button, once shown, opens the pane through its command', a
     await ui.press({ key: 'flight-recorder' })
     await ui.unmount()
   }
-  expect(ran).toEqual(['flight-recorder', 'flight-recorder'])
+  expect(ran).toEqual(['hud-flight-recorder', 'hud-flight-recorder'])
 })
 
 test('a shown button stays out while its mod is not loaded', async ($, on) => {
@@ -175,7 +175,7 @@ test('shown buttons sit in one row: plane, gear, HUD; the HUD button opens sessi
     await ui.press({ key: 'session-hud' })
     await ui.unmount()
   }
-  expect(ran).toEqual(['hud', 'hud'])
+  expect(ran).toEqual(['hud-session', 'hud-session'])
 })
 
 test('reset countdown is short, with no space inside', () => {
@@ -186,13 +186,13 @@ test('reset countdown is short, with no space inside', () => {
   expect(untilReset(at(42), now)).toBe('42m')
 })
 
-test('/usageband <button> turns it on and off, and /usageband buttons lists them', async ($, on) => {
+test('/band-usage <button> turns it on and off, and /band-usage buttons lists them', async ($, on) => {
   mock.store(on)
   beneath(on)
   await measure($)
   const band = () => $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
 
-  const before = await $.command.run({ command: 'usageband', args: 'buttons' })
+  const before = await $.command.run({ command: 'band-usage', args: 'buttons' })
   expect(before.text).toContain('flight-recorder: off')
   expect(before.text).toContain('hud: off')
 
@@ -203,7 +203,7 @@ test('/usageband <button> turns it on and off, and /usageband buttons lists them
   expect(await ui.find({ type: 'Button', key: 'flight-recorder' })).toBeUndefined()
   await ui.unmount()
 
-  const list = await $.command.run({ command: 'usageband', args: 'buttons' })
+  const list = await $.command.run({ command: 'band-usage', args: 'buttons' })
   expect(list.text).toContain('hud: on')
   expect(list.text).toContain('flight-recorder: off')
 
@@ -238,7 +238,7 @@ test('cache hit: the share of input the cache served, green when high', () => {
   expect([hitLevel(90), hitLevel(63), hitLevel(20)]).toEqual(['success', 'warning', 'error'])
 })
 
-test('/usageband open <pane> opens it through its command, just after, buttons on or off', async ($, on) => {
+test('/band-usage open <pane> opens it through its command, just after, buttons on or off', async ($, on) => {
   const ran: string[] = []
   mock.store(on)
   const clock = mock.clock(on)
@@ -248,18 +248,47 @@ test('/usageband open <pane> opens it through its command, just after, buttons o
     return { text: 'opened' }
   })
   for (const pane of ['flight-recorder', 'switchboard', 'hud']) {
-    const out = await $.command.run({ command: 'usageband', args: 'open ' + pane })
+    const out = await $.command.run({ command: 'band-usage', args: 'open ' + pane })
     expect(out.text).toBeUndefined()
   }
   await clock.settle()
-  expect(ran).toEqual(['flight-recorder', 'switchboard', 'hud'])
-  const wrong = await $.command.run({ command: 'usageband', args: 'open nope' })
+  expect(ran).toEqual(['hud-flight-recorder', 'hud-switchboard', 'hud-session'])
+  const wrong = await $.command.run({ command: 'band-usage', args: 'open nope' })
   expect(wrong.text).toMatch(/open <pane> \(flight-recorder, switchboard, hud\)/)
 })
 
-test('/usageband open says so when that mod is not loaded', async ($, on) => {
+test('/band-usage open says so when that mod is not loaded', async ($, on) => {
   mock.store(on)
   beneath(on, [] as never)
-  const out = await $.command.run({ command: 'usageband', args: 'open hud' })
+  const out = await $.command.run({ command: 'band-usage', args: 'open hud' })
   expect(out.text).toBe('The hud mod is not loaded.')
+})
+
+test('cache clock: warm with the minutes left for an hour after the last request, then cold with the time idle', () => {
+  const now = 10_000_000
+  const ago = (mins: number) => now - mins * 60_000
+  expect(cacheClock(0, now)).toBeUndefined()
+  expect(cacheClock(ago(6), now)).toEqual({ mode: 'warm', mins: 54 })
+  expect(cacheClock(ago(59), now)).toEqual({ mode: 'warm', mins: 1 })
+  expect(cacheClock(ago(60), now)).toEqual({ mode: 'cold', mins: 60 })
+  // a request just sent, before the clock ticked: a full hour left, never more
+  expect(cacheClock(now + 5000, now)).toEqual({ mode: 'warm', mins: 60 })
+  expect([fmtMins(45), fmtMins(125), fmtMins(3 * 1440 + 9 * 60)]).toEqual(['45m', '2h5m', '3d9h'])
+})
+
+test('a resumed session shows the cache cold with its idle time, Robo only off the terminal; /clear drops it', async ($, on) => {
+  beneath(on)
+  on('classic.SessionStart', () => ({}))
+  on('clock.now', () => ({ value: 50_000_000 }))
+  await measure($)
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 2 * 3600 + 5 * 60 } as never)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: PROPS })
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    expect(texts).toContain('cold 2h5m')
+    expect((await ui.findAll({ type: 'Svg' })).some(s => String(s.props.alt).startsWith('Robo'))).toBe(surface === 'desktop')
+  }
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
+  expect((await ui.findAll({ type: 'Text' })).map(t => t.text).some(t => /^(warm|cold) /.test(t))).toBe(false)
 })
