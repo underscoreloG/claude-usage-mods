@@ -296,4 +296,11 @@ test('a resumed session shows the cache cold with its idle time, Robo only off t
   await $.classic.SessionStart({ source: 'fork', seconds_since_last_response: 0 } as never)
   const fresh = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   expect((await fresh.findAll({ type: 'Text' })).map(t => t.text)).toContain('warm 60m')
+  await fresh.unmount()
+  // a narrow band keeps Robo, the time and the %, without the word; the terminal, with no Robo, keeps it
+  for (const surface of ['desktop', 'terminal'] as const) {
+    const narrow = await $.ui.mount({ plugin: 'usage-band', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 80 } })
+    expect((await narrow.findAll({ type: 'Text' })).map(t => t.text)).toContain(surface === 'desktop' ? '60m' : 'warm 60m')
+    await narrow.unmount()
+  }
 })

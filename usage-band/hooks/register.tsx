@@ -27,6 +27,9 @@ const ICON = 16
 const ICON_GREY = '#8B8B95'
 // Robo stands a little taller than the icons, as ribbon's does beside its chip
 const ROBO = 18
+// Cells a full one-line band takes (model, context, 5h, 7d, cache, cost and separators: about 97);
+// narrower, the cache drops its warm/cold word beside Robo, whose look already says which
+const WIDE_BAND = 100
 // U+2800 draws nothing yet is not whitespace, so no surface trims it away
 const BLANK = '\u2800'.repeat(2)
 const glyphSvg = (glyph: string) =>
@@ -315,12 +318,15 @@ export const register: Register = on => {
     const hit = cacheHit(cache.read, cache.total)
     const clock = cacheClock(await read($, lastAtAtom), now)
     if (clock || hit !== undefined) {
+      const RoboSvg = e.surface === 'terminal' || !('Svg' in elements) ? undefined : elements.Svg
+      const word = !RoboSvg || e.props.bodyColumns >= WIDE_BAND
       const text = (
         <Text wrap="truncate">
           {clock && (
             <Text color={HUE[clock.mode]}>
               {/* warm counts down from the hour in minutes (60m, not 1h0m); cold says how long idle */}
-              <Text bold>{clock.mode}</Text> {clock.mode === 'warm' ? `${clock.mins}m` : fmtMins(clock.mins)}
+              {word && <Text bold>{clock.mode} </Text>}
+              {clock.mode === 'warm' ? `${clock.mins}m` : fmtMins(clock.mins)}
               {hit !== undefined && ' '}
             </Text>
           )}
@@ -331,7 +337,6 @@ export const register: Register = on => {
           )}
         </Text>
       )
-      const RoboSvg = e.surface === 'terminal' || !('Svg' in elements) ? undefined : elements.Svg
       groups.push(
         clock && RoboSvg ? (
           <Box flexDirection="row" alignItems="center" gap={1}>
