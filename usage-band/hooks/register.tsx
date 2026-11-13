@@ -14,7 +14,7 @@ const cacheAtom = atom({ plugin: 'usage-band', key: 'cache' } as const, { read: 
 const lastAtAtom = atom({ plugin: 'usage-band', key: 'lastAt' } as const, 0)
 // the buttons you turned on: none by default, kept across sessions
 const shownButtonsAtom = atom({ plugin: 'usage-band', key: 'shownButtons' } as const, [])
-// the band's layout: auto picks by width, wide or narrow holds whatever the width; kept across sessions
+// the band's layout: auto shows what fits the width, wide or narrow holds whatever the width; kept across sessions
 const LAYOUTS = ['auto', 'wide', 'narrow'] as const
 const AUTO: (typeof LAYOUTS)[number] = 'auto'
 const layoutAtom = atom({ plugin: 'usage-band', key: 'layout' } as const, AUTO)
@@ -31,17 +31,43 @@ const ICON = 16
 const ICON_GREY = '#8B8B95'
 // Robo stands a little taller than the icons, as ribbon's does beside its chip
 const ROBO = 18
-// Cells a full one-line band takes (model, context, 5h, 7d, cache, cost and separators). In the
-// terminal a cell is a character: about 97. The desktop counts cells of about 12 px in its own
-// proportional font: a full band fit on one line at 85, seen live, its text about 78 (84 leaves
-// room for longer values). Narrower, each group keeps its number alone: context % without its bar
-// and tokens, the limits without their reset, the cache as Robo and its hit % (the word where
-// there is no Robo)
-const WIDE_BAND = { terminal: 100, other: 84 }
-const wideFrom = (surface: string) => (surface === 'terminal' ? WIDE_BAND.terminal : WIDE_BAND.other)
-const wideNote = `wide from ${WIDE_BAND.other} cells, ${WIDE_BAND.terminal} in the terminal`
-// The cells each surface last drew the band in and the layout it picked, for /band-usage width
-const drawnAt: Record<string, { columns: number; narrow: boolean }> = {}
+// What a band wider than its column leaves out, first to last, until the rest fits on one line.
+// With all of it out (the narrow band) each section keeps its number alone: context % without its
+// bar and tokens, the limits without their reset, the cache as Robo and its hit % (the word where
+// there is no Robo), the cost without its money bag
+const DROPS = ['tokens', 'coin', 'word', 'bar', 'time', 'resets'] as const
+type Drop = (typeof DROPS)[number]
+const DROP_NAME: Record<Drop, string> = {
+  tokens: 'token counts',
+  coin: '💰',
+  word: 'cache word',
+  bar: 'context bar',
+  time: 'cache time',
+  resets: 'reset countdowns',
+}
+// Cells kept free. Off the terminal the count is an estimate, and a band even a cell too wide
+// wraps every section onto two lines there, so it keeps more
+const SLACK = { terminal: 2, other: 4 }
+
+// Cells a text takes. In the terminal a cell is a character, an emoji two. The desktop draws its
+// own proportional font in cells of about 9 px (a 770 pt band is 85 cells): a letter or digit
+// takes about 0.85 of one, a bar box 1.5, an emoji 2, measured on a live band
+export function cellsOf(text: string, terminal: boolean): number {
+  let n = 0
+  for (const ch of text) n += (ch.codePointAt(0) ?? 0) >= 0x1f000 ? 2 : terminal ? 1 : ch === '▰' ? 1.5 : 0.85
+  return n
+}
+
+// Cells a one-line band takes: its sections' text, its icons, and between each pair of sections a
+// separator with a space either side
+export function bandCells(sections: string[], icons: number, terminal: boolean): number {
+  const text = sections.reduce((n, s) => n + cellsOf(s, terminal), 0)
+  return Math.ceil(text + icons + (sections.length - 1) * (terminal ? 3 : 2.5))
+}
+
+// The cells each surface last drew the band in, what the whole band takes and what it left out,
+// for /band-usage width
+const drawnAt: Record<string, { columns: number; need: number; dropped: Drop[] }> = {}
 // U+2800 draws nothing yet is not whitespace, so no surface trims it away
 const BLANK = '\u2800'.repeat(2)
 const glyphSvg = (glyph: string) =>
@@ -178,21 +204,24 @@ export const register: Register = on => {
       return { text: hidden ? 'Usage band hidden.' : 'Usage band shown.' }
     }
     const names = BUTTONS.map(b => b.name).join(', ')
-    // width alone says what each surface last drew the band in: the cells it was given and the layout
-    // it used; width auto | wide | narrow sets the layout, auto picking by width
+    // width alone says what each surface last drew the band in: the cells it was given, the cells the
+    // whole band takes and what it left out; width auto | wide | narrow sets the layout, auto
+    // showing what fits
     if (verb === 'width') {
       const pick = LAYOUTS.find(l => l === second)
       if (second !== undefined && !pick) return { text: 'Use /band-usage width, or /band-usage width auto | wide | narrow.' }
       if (pick) {
         await update($, layoutAtom, () => pick)
         await $.store.set('layout', pick)
-        return { text: pick === 'auto' ? `The band picks its layout by width again (${wideNote}).` : `The band stays ${pick}, whatever its width. It stays that way in new sessions.` }
+        return { text: pick === 'auto' ? 'The band shows what fits its width again.' : `The band stays ${pick}, whatever its width. It stays that way in new sessions.` }
       }
       const layout = await read($, layoutAtom)
       const rows = Object.entries(drawnAt).map(
-        ([surface, d]) => `${surface}: ${d.columns} cells (bodyColumns), ${d.narrow ? 'narrow' : 'wide'} layout`,
+        ([surface, d]) =>
+          `${surface}: ${d.columns} cells (bodyColumns), the whole band takes about ${d.need}, ` +
+          (d.dropped.length ? `left out: ${d.dropped.map(x => DROP_NAME[x]).join(', ')}` : 'nothing left out'),
       )
-      const setting = layout === 'auto' ? `Layout: auto (${wideNote}).` : `Layout: ${layout}, set with /band-usage width ${layout}.`
+      const setting = layout === 'auto' ? 'Layout: auto (shows what fits the width).' : `Layout: ${layout}, set with /band-usage width ${layout}.`
       return { text: `Usage band width\n${rows.length ? rows.join('\n') : 'The band has not drawn yet.'}\n${setting}` }
     }
     if (verb === 'buttons') {
@@ -307,9 +336,65 @@ export const register: Register = on => {
       // no command list: leave the buttons out
     }
     const pct = usage.percent ?? 0
+    const terminal = e.surface === 'terminal'
+    const Svg = terminal || !('Svg' in elements) ? undefined : elements.Svg
+    const tokens = `${fmtTokens(usage.tokens ?? 0)}/${fmtTokens(usage.window)}`
+    const limits = usage.limits.map(l => ({ name: limitName(l.kind), pct: l.percentUsed, reset: untilReset(l.resetsAt, now) }))
+    const cost = usage.cost === undefined ? undefined : `$${usage.cost.toFixed(2)}`
+    // The cache: Robo, warm with the minutes left or cold with the time idle, then the hit rate
+    const cache = await read($, cacheAtom)
+    const hit = cacheHit(cache.read, cache.total)
+    const clock = cacheClock(await read($, lastAtAtom), now)
+    // warm counts down from the hour in minutes (60m, not 1h0m); cold says how long idle
+    const clockTime = clock && (clock.mode === 'warm' ? `${clock.mins}m` : fmtMins(clock.mins))
+    const buttonCount = [hasFlight, hasSwitchboard, hasHud].filter(Boolean).length
+
+    // What shows with these left out. The cache's word stays where no Robo says warm or cold, and
+    // its time stays while it is all the cache has to show (no response counted yet)
+    const showing = (out: ReadonlySet<Drop>) => ({
+      tokens: !out.has('tokens'),
+      coin: !out.has('coin'),
+      word: !Svg || !out.has('word'),
+      bar: !out.has('bar'),
+      time: !out.has('time') || hit === undefined,
+      resets: !out.has('resets'),
+    })
+    // The cells the band takes with these left out: each section's text as it is drawn below, Robo
+    // (18 px and its gap) and, as one more section, the buttons (an icon and its gap each)
+    const cellsWith = (out: ReadonlySet<Drop>) => {
+      const s = showing(out)
+      const sections: string[] = []
+      if (model) sections.push(shortModel(model))
+      sections.push(`${s.bar ? '▰'.repeat(8) + ' ' : ''}${pct}%${s.tokens ? ' ' + tokens : ''}`)
+      for (const l of limits) sections.push(`${l.name} ${l.pct}%${l.reset && s.resets ? ` ↻ ${l.reset}` : ''}`)
+      if (clock || hit !== undefined) {
+        sections.push([clock && s.word && clock.mode, clock && s.time && clockTime, hit !== undefined && `${hit}%`].filter(Boolean).join(' '))
+      }
+      if (cost) sections.push(`${s.coin ? '💰 ' : ''}${cost}`)
+      let icons = clock && Svg ? 3 : 0
+      if (buttonCount > 0) {
+        sections.push('')
+        icons += buttonCount * (terminal ? 5 : 3) - 1
+      }
+      return bandCells(sections, icons, terminal)
+    }
+    // auto leaves out, in order, what it takes for the rest to fit; wide leaves nothing out and
+    // narrow all of it. One that frees no room here (no Robo, no cost yet) is not left out.
     const layout = await read($, layoutAtom)
-    const narrow = layout === 'narrow' || (layout === 'auto' && e.props.bodyColumns < wideFrom(e.surface))
-    drawnAt[e.surface] = { columns: e.props.bodyColumns, narrow }
+    const room = layout === 'wide' ? Infinity : layout === 'narrow' ? 0 : e.props.bodyColumns - (terminal ? SLACK.terminal : SLACK.other)
+    const need = cellsWith(new Set())
+    const out = new Set<Drop>()
+    let cells = need
+    for (const d of DROPS) {
+      if (cells <= room) break
+      const less = cellsWith(new Set([...out, d]))
+      if (less < cells) {
+        out.add(d)
+        cells = less
+      }
+    }
+    const show = showing(out)
+    drawnAt[e.surface] = { columns: e.props.bodyColumns, need, dropped: [...out] }
 
     // One line: each group is its value alone, the limits led by a blue "5h" or "7d"
     const group = (value: RenderElement) => <Text wrap="truncate">{value}</Text>
@@ -318,59 +403,42 @@ export const register: Register = on => {
     if (model) groups.push(group(<Text color="claude">{shortModel(model)}</Text>))
     groups.push(
       group(
-        narrow ? (
-          <Text color={level(pct)} bold>
-            {pct}%
-          </Text>
-        ) : (
         <Text>
-          <Text color={level(pct)}>{bar(pct, 8)[0]}</Text>
-          <Text dimColor>{bar(pct, 8)[1]}</Text>
+          {show.bar && <Text color={level(pct)}>{bar(pct, 8)[0]}</Text>}
+          {show.bar && <Text dimColor>{bar(pct, 8)[1]}</Text>}
           <Text color={level(pct)} bold>
-            {' '}
+            {show.bar && ' '}
             {pct}%
           </Text>
-          <Text dimColor>
-            {' '}
-            {fmtTokens(usage.tokens ?? 0)}/{fmtTokens(usage.window)}
-          </Text>
-        </Text>
-        ),
+          {show.tokens && <Text dimColor> {tokens}</Text>}
+        </Text>,
       ),
     )
-    for (const l of usage.limits) {
-      const reset = untilReset(l.resetsAt, now)
+    for (const l of limits) {
       groups.push(
         group(
           <Text>
-            <Text color="suggestion">{limitName(l.kind)} </Text>
-            <Text color={level(l.percentUsed)} bold>
-              {l.percentUsed}%
+            <Text color="suggestion">{l.name} </Text>
+            <Text color={level(l.pct)} bold>
+              {l.pct}%
             </Text>
             {/* "↻ 2h11m" rather than "resets 2h 11m": short enough to keep the band on one line */}
-            {reset && !narrow && <Text dimColor> ↻ {reset}</Text>}
+            {l.reset && show.resets && <Text dimColor> ↻ {l.reset}</Text>}
           </Text>,
         ),
       )
     }
-    // The cache: Robo, warm with the minutes left or cold with the time idle, then the hit rate.
     // Off the terminal Robo opens the /hud-cache card, as ribbon's Show does.
-    const cache = await read($, cacheAtom)
-    const hit = cacheHit(cache.read, cache.total)
-    const clock = cacheClock(await read($, lastAtAtom), now)
     if (clock || hit !== undefined) {
-      const RoboSvg = e.surface === 'terminal' || !('Svg' in elements) ? undefined : elements.Svg
-      const word = !RoboSvg || !narrow
-      // narrow, the time goes, unless it is all there is to show yet (no response counted)
-      const time = !narrow || hit === undefined
+      const RoboSvg = Svg
+      const { word, time } = show
       const text = (
         <Text wrap="truncate">
           {clock && (
             <Text color={HUE[clock.mode]}>
-              {/* warm counts down from the hour in minutes (60m, not 1h0m); cold says how long idle */}
               {word && <Text bold>{clock.mode}</Text>}
               {word && time && ' '}
-              {time && (clock.mode === 'warm' ? `${clock.mins}m` : fmtMins(clock.mins))}
+              {time && clockTime}
               {(word || time) && hit !== undefined && ' '}
             </Text>
           )}
@@ -411,14 +479,13 @@ export const register: Register = on => {
         ),
       )
     }
-    if (usage.cost !== undefined) {
+    if (cost) {
       groups.push(
         group(
           <Text>
-            {/* narrow, the amount alone */}
-            {!narrow && <Text>💰 </Text>}
+            {show.coin && <Text>💰 </Text>}
             {/* an estimate at API prices, so it reads quietly: the band's dim grey, not bold */}
-            <Text dimColor>${usage.cost.toFixed(2)}</Text>
+            <Text dimColor>{cost}</Text>
           </Text>,
         ),
       )
@@ -427,8 +494,6 @@ export const register: Register = on => {
     // The buttons sit in a row at the end of the line. Off the terminal each
     // is an icon drawn at a set size, pressed through a plain Button laid over it (as Switchboard
     // draws its switches): a Button's own size is the surface's to choose.
-    const terminal = e.surface === 'terminal'
-    const Svg = terminal || !('Svg' in elements) ? undefined : elements.Svg
     const button = (key: string, label: string, glyph: string, svg: string, onPress: () => void) =>
       Svg === undefined ? (
         <Button key={key} label={glyph} onPress={onPress} />
