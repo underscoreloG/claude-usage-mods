@@ -232,6 +232,42 @@ test('a shown button stays shown in a new session', async ($, on) => {
   await ui.unmount()
 })
 
+// One model request: the main thread's, or a subagent's when agentId is given
+async function step($, model: string, effort?: string, agentId?: string) {
+  const stream = $.turn.step({ turnId: 't', index: 0, model, effort, agentId } as never)
+  for await (const _ of stream);
+  return stream.result
+}
+
+test('the effort shows after the model, from the main thread\'s requests alone', async ($, on) => {
+  mock.clock(on)
+  beneath(on)
+  on('turn.step', async function* () {
+    return { turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'end_turn', usage: null } as never
+  })
+  await measure($)
+  const texts = async () => {
+    const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+    const all = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    await ui.unmount()
+    return all
+  }
+  await step($, 'claude-opus-5-5', 'high')
+  expect(await texts()).toContain('opus 5.5 high')
+  // a subagent's effort is its own: the band keeps the main thread's
+  await step($, 'claude-haiku-5-5', 'low', 'agent-1')
+  expect(await texts()).toContain('opus 5.5 high')
+  // /effort max shows from the next request
+  await step($, 'claude-opus-5-5', 'max')
+  expect(await texts()).toContain('opus 5.5 max')
+  // a model that takes no effort shows its name alone
+  await step($, 'claude-haiku-5-5')
+  const last = await texts()
+  expect(last).toContain('haiku 5.5')
+  expect(last.some(t => /haiku 5\.5 /.test(t))).toBe(false)
+})
+
+
 test('cache hit: the share of input the cache served, green when high', () => {
   expect(cacheHit(0, 0)).toBeUndefined()
   expect(cacheHit(63, 100)).toBe(63)
