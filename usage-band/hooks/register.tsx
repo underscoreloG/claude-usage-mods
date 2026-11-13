@@ -50,11 +50,12 @@ const DROP_NAME: Record<Drop, string> = {
 const SLACK = { terminal: 2, other: 4 }
 
 // Cells a text takes. In the terminal a cell is a character, an emoji two. The desktop draws its
-// own proportional font in cells of about 9 px (a 770 pt band is 85 cells): a letter or digit
-// takes about 0.85 of one, a bar box 1.5, an emoji 2, measured on a live band
+// own proportional font, and a cell there is about a digit wide: a column of 99 cells (and the
+// engine's five) held 104 digits, seen live, where a whole band counted at 0.85 a character wrapped.
+// Its bar box is wider, 1.8 cells. Letters differ, so the count there is an estimate
 export function cellsOf(text: string, terminal: boolean): number {
   let n = 0
-  for (const ch of text) n += (ch.codePointAt(0) ?? 0) >= 0x1f000 ? 2 : terminal ? 1 : ch === '▰' ? 1.5 : 0.85
+  for (const ch of text) n += (ch.codePointAt(0) ?? 0) >= 0x1f000 ? 2 : !terminal && ch === '▰' ? 1.8 : 1
   return n
 }
 
@@ -62,7 +63,7 @@ export function cellsOf(text: string, terminal: boolean): number {
 // separator with a space either side
 export function bandCells(sections: string[], icons: number, terminal: boolean): number {
   const text = sections.reduce((n, s) => n + cellsOf(s, terminal), 0)
-  return Math.ceil(text + icons + (sections.length - 1) * (terminal ? 3 : 2.5))
+  return Math.ceil(text + icons + (sections.length - 1) * 3)
 }
 
 // The cells each surface last drew the band in, what the whole band takes and what it left out,
@@ -360,7 +361,7 @@ export const register: Register = on => {
       resets: !out.has('resets'),
     })
     // The cells the band takes with these left out: each section's text as it is drawn below, Robo
-    // (18 px and its gap) and, as one more section, the buttons (an icon and its gap each)
+    // (18 px, about 2.5 cells, and its gap) and, as one more section, the buttons (an icon and its gap each)
     const cellsWith = (out: ReadonlySet<Drop>) => {
       const s = showing(out)
       const sections: string[] = []
@@ -371,7 +372,7 @@ export const register: Register = on => {
         sections.push([clock && s.word && clock.mode, clock && s.time && clockTime, hit !== undefined && `${hit}%`].filter(Boolean).join(' '))
       }
       if (cost) sections.push(`${s.coin ? '💰 ' : ''}${cost}`)
-      let icons = clock && Svg ? 3 : 0
+      let icons = clock && Svg ? 3.5 : 0
       if (buttonCount > 0) {
         sections.push('')
         icons += buttonCount * (terminal ? 5 : 3) - 1

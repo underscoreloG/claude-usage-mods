@@ -279,13 +279,18 @@ async function busy($, on) {
 }
 const widthReport = async $ => (await $.command.run({ command: 'band-usage', args: 'width' })).text ?? ''
 
-test('cells: a terminal cell is a character, the desktop counts a proportional font', () => {
+test('cells: a character each, an emoji two; the desktop draws a wider bar box', () => {
   expect([cellsOf('5h 19%', true), cellsOf('💰 ', true), cellsOf('▰▰', true)]).toEqual([6, 3, 2])
-  expect(cellsOf('▰▰', false)).toBe(3)
-  expect(Math.round(cellsOf('1234', false) * 100)).toBe(340)
+  expect([cellsOf('5h 19%', false), cellsOf('💰 ', false)]).toEqual([6, 3])
+  expect(Math.round(cellsOf('▰▰', false) * 10)).toBe(36)
   // two sections and the separator between them, a space either side
   expect(bandCells(['ab', 'cd'], 0, true)).toBe(7)
-  expect(bandCells(['ab', 'cd'], 3, false)).toBe(9)
+  expect(bandCells(['ab', 'cd'], 3.5, false)).toBe(11)
+  // a band seen live on a 99-cell desktop column, where it wrapped onto two lines: it takes 105,
+  // and 95 without its token counts, which the four cells kept free just allow
+  const live = ['sonnet 5.5', '▰▰▰▰▰▰▰▰ 12% 121.7k/1M', '5h 32% ↻ 1h43m', '7d 17% ↻ 6d12h', 'warm 60m 89%', '💰 $0.42']
+  expect(bandCells(live, 3.5, false)).toBe(105)
+  expect(bandCells(live.map(s => s.replace(' 121.7k/1M', '')), 3.5, false)).toBe(95)
 })
 
 test('a band wider than its column leaves out what it takes to fit: token counts first', async ($, on) => {
@@ -297,29 +302,29 @@ test('a band wider than its column leaves out what it takes to fit: token counts
     await ui.unmount()
     return { texts, sections, report: await widthReport($) }
   }
-  // the desktop column tops out near 85 cells: the whole band takes 76 and shows whole
-  let d = await drawn('desktop', 85)
-  expect(d.report).toContain('desktop: 85 cells (bodyColumns), the whole band takes about 76, nothing left out')
+  // the whole band takes 89 cells on desktop (a wider bar, Robo) and four are kept free: whole from 93
+  let d = await drawn('desktop', 93)
+  expect(d.report).toContain('desktop: 93 cells (bodyColumns), the whole band takes about 89, nothing left out')
   expect(d.texts).toContain('▰▰▰▰▰▰▰▰ 23% 225.4k/1M')
-  // four cells are kept free there, so at 79 the token counts go and all else stays
-  d = await drawn('desktop', 79)
-  expect(d.report).toContain('desktop: 79 cells (bodyColumns), the whole band takes about 76, left out: token counts')
+  // a cell less and the token counts go; all else stays
+  d = await drawn('desktop', 92)
+  expect(d.report).toContain('desktop: 92 cells (bodyColumns), the whole band takes about 89, left out: token counts')
   expect(d.texts).toContain('▰▰▰▰▰▰▰▰ 23%')
   expect(d.texts).toContain('5h 19% ↻ 1h56m')
   expect(d.texts).toContain('warm 59m')
   expect(d.texts).toContain('💰 ')
   // narrower, the money bag, then the cache's word (Robo says it), then the bar
-  d = await drawn('desktop', 70)
+  d = await drawn('desktop', 81)
   expect(d.report).toContain('left out: token counts, 💰')
-  d = await drawn('desktop', 66)
+  d = await drawn('desktop', 77)
   expect(d.report).toContain('left out: token counts, 💰, cache word')
   expect(d.texts).toContain('59m')
-  d = await drawn('desktop', 60)
+  d = await drawn('desktop', 70)
   expect(d.report).toContain('left out: token counts, 💰, cache word, context bar')
   expect(d.texts).toContain('7d 15% ↻ 6d12h')
   // at the narrowest each section is its number alone; the cache's time stays while it is all the
   // cache has to show, so it is not among what was left out
-  d = await drawn('desktop', 40)
+  d = await drawn('desktop', 45)
   expect(d.report).toContain('left out: token counts, 💰, cache word, context bar, reset countdowns')
   expect(d.texts).toContain('5h 19%')
   expect(d.texts.some(t => t.includes('↻') || t.includes('▰'))).toBe(false)
@@ -342,13 +347,13 @@ test('buttons take room too: a band that fit whole leaves something out once the
   mock.store(on)
   await busy($, on)
   const report = async () => {
-    const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 85 } })
+    const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'desktop', component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 99 } })
     await ui.unmount()
     return widthReport($)
   }
   expect(await report()).toContain('nothing left out')
   for (const b of ['flight-recorder', 'switchboard', 'hud']) await toggle($, b)
-  expect(await report()).toContain('desktop: 85 cells (bodyColumns), the whole band takes about 86, left out: token counts')
+  expect(await report()).toContain('desktop: 99 cells (bodyColumns), the whole band takes about 100, left out: token counts')
 })
 
 test('/band-usage width wide | narrow | auto holds a layout whatever the width, kept across sessions', async ($, on) => {
