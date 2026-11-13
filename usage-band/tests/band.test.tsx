@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { bandCells, cacheClock, cacheHit, cellsOf, fmtMins, hitLevel, untilReset } from '../hooks/register'
+import { bandCells, cacheClock, cacheHit, cellsOf, fmtMins, hitLevel, untilReset, worktreeName } from '../hooks/register'
 
 const PROPS = {
   hasSurvey: false,
@@ -177,6 +177,55 @@ test('shown buttons sit in one row: plane, gear, HUD; the HUD button opens sessi
     await ui.unmount()
   }
   expect(ran).toEqual(['hud-session', 'hud-session'])
+})
+
+test('worktree name: Claude Code\'s by its name, any other by its folder, none in the main checkout', () => {
+  expect(worktreeName('/r', '/r')).toBe(null)
+  expect(worktreeName('/r', undefined)).toBe(null)
+  expect(worktreeName('/r/.claude/worktrees/fix-x', '/r')).toBe('fix-x')
+  expect(worktreeName('/r/.claude/worktrees/team/fix-x', '/r')).toBe('team/fix-x')
+  expect(worktreeName('/r/src', '/r')).toBe(null)
+  expect(worktreeName('/elsewhere/r-fix/', '/r')).toBe('r-fix')
+})
+
+test('the worktree shows first from the session start, and follows the root on the next request', async ($, on) => {
+  mock.store(on, {})
+  mock.clock(on)
+  let root = '/r/.claude/worktrees/fix-x'
+  on('command.register', () => ({ value: undefined }))
+  on('session.root', () => ({ value: root }))
+  on('session.repo', () => ({ value: { root: '/r', remote: null, internal: false, name: null } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('turn.step', async function* () {
+    return { turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'end_turn', usage: null } as never
+  })
+  beneath(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await measure($)
+  const request = async (agentId?: string) => {
+    const stream = $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-5-5', agentId } as never)
+    for await (const _ of stream);
+  }
+  const texts = async () => {
+    const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+    const all = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    await ui.unmount()
+    return all
+  }
+  const first = await texts()
+  expect(first).toContain('⎇ fix-x')
+  // first in the band: before the context bar
+  expect(first.indexOf('⎇ fix-x')).toBeLessThan(first.findIndex(t => t.startsWith('▰')))
+  // ExitWorktree takes the session back to the main checkout: the next request drops the name
+  root = '/r'
+  await request()
+  expect((await texts()).some(t => t.includes('⎇'))).toBe(false)
+  // a subagent's request leaves the band as it is
+  root = '/r/.claude/worktrees/other'
+  await request('agent-1')
+  expect((await texts()).some(t => t.includes('⎇'))).toBe(false)
+  await request()
+  expect(await texts()).toContain('⎇ other')
 })
 
 test('reset countdown is short, with no space inside', () => {
