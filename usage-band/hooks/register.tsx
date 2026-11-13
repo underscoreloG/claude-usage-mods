@@ -185,6 +185,13 @@ export const register: Register = on => {
     const kept = LAYOUTS.find(l => l === layout)
     if (kept) await update($, layoutAtom, () => kept)
     await refresh($)
+    // the model before the first request; turn.step keeps it current after
+    try {
+      const model = await $.session.model()
+      if (model) await update($, modelAtom, () => model)
+    } catch {
+      // no model to read yet: the first request sets it
+    }
     const now = await $.clock.now()
     await update($, nowAtom, () => now)
     // keeps the reset countdowns honest while idle
@@ -287,6 +294,13 @@ export const register: Register = on => {
     }
     return r
   }).catch(($, e, next) => next(e)) // a band that fails to seed never holds up the session
+
+  // /model, the picker or a fallback: the new name shows at once, not at the next request
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    const r = await next(e)
+    await update($, modelAtom, () => e.to_model)
+    return r
+  }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {
     // each main-thread request reads or writes the cache, so its start resets the hour;

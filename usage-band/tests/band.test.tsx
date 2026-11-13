@@ -443,3 +443,25 @@ test('a resumed session shows the cache cold with its idle time, Robo only off t
     await narrow.unmount()
   }
 })
+
+test('the model shows from the session start, and a /model switch shows at once', async ($, on) => {
+  mock.store(on, {})
+  mock.clock(on)
+  on('command.register', () => ({ value: undefined }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('classic.PostModelSwitch', () => ({}))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  beneath(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await measure($)
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect((await ui.findAll({ type: 'Text' })).map(t => t.text)).toContain('opus 5.5')
+  await ui.unmount()
+  // a /model switch shows the new model at once, before the next request
+  await $.classic.PostModelSwitch({ to_model: 'claude-sonnet-5-5', source: 'command' } as never)
+  const after = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  const texts = (await after.findAll({ type: 'Text' })).map(t => t.text)
+  expect(texts).toContain('sonnet 5.5')
+  expect(texts).not.toContain('opus 5.5')
+  await after.unmount()
+})
