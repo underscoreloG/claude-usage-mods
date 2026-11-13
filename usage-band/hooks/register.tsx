@@ -6,6 +6,8 @@ import { HUE, roboSvg } from './robo'
 
 const usageAtom = atom({ plugin: 'usage-band', key: 'usage' } as const, null)
 const modelAtom = atom({ plugin: 'usage-band', key: 'model' } as const, null)
+// the effort the main thread's last request asked for: no call reads it before the first request
+const effortAtom = atom({ plugin: 'usage-band', key: 'effort' } as const, null)
 const nowAtom = atom({ plugin: 'usage-band', key: 'now' } as const, 0)
 const hiddenAtom = atom({ plugin: 'usage-band', key: 'isHidden' } as const, false)
 // input tokens this session, and how many of them the prompt cache served
@@ -322,6 +324,9 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       const model = result.usage?.model ?? e.model
       if ((await read($, modelAtom)) !== model) await update($, modelAtom, () => model)
+      // absent on a model that takes no effort
+      const effort = e.effort === undefined ? null : String(e.effort)
+      if ((await read($, effortAtom)) !== effort) await update($, effortAtom, () => effort)
     }
     await refresh($)
     return result
@@ -332,6 +337,7 @@ export const register: Register = on => {
     const usage = await read($, usageAtom)
     if (!usage) return next(e)
     const model = await read($, modelAtom)
+    const effort = await read($, effortAtom)
     const now = await read($, nowAtom)
     const elements = $.ui.resolve(e)
     const { Box, Text, Button } = elements
@@ -379,7 +385,7 @@ export const register: Register = on => {
     const cellsWith = (out: ReadonlySet<Drop>) => {
       const s = showing(out)
       const sections: string[] = []
-      if (model) sections.push(shortModel(model))
+      if (model) sections.push(effort ? `${shortModel(model)} ${effort}` : shortModel(model))
       sections.push(`${s.bar ? '▰'.repeat(8) + ' ' : ''}${pct}%${s.tokens ? ' ' + tokens : ''}`)
       for (const l of limits) sections.push(`${l.name} ${l.pct}%${l.reset && s.resets ? ` ↻ ${l.reset}` : ''}`)
       if (clock || hit !== undefined) {
@@ -413,9 +419,18 @@ export const register: Register = on => {
 
     // One line: each group is its value alone, the limits led by a blue "5h" or "7d"
     const group = (value: RenderElement) => <Text wrap="truncate">{value}</Text>
-    // In order: model, context, 5h and 7d limits, cache hit, cost
+    // In order: model (and its effort), context, 5h and 7d limits, cache hit, cost
     const groups: RenderElement[] = []
-    if (model) groups.push(group(<Text color="claude">{shortModel(model)}</Text>))
+    if (model) {
+      groups.push(
+        group(
+          <Text>
+            <Text color="claude">{shortModel(model)}</Text>
+            {effort && <Text dimColor> {effort}</Text>}
+          </Text>,
+        ),
+      )
+    }
     groups.push(
       group(
         <Text>

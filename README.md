@@ -20,7 +20,7 @@ Commands follow one scheme: `/hud-<name>` opens a pane, `/band-<name>` shows or 
 
 **usage-band** is the bottom row: one line that answers "how much room and budget do I have left?" without running `/usage` or `/context`. From left to right:
 
-- **Model** - the model the main loop is running, in Claude orange.
+- **Model** - the model the main loop is running, in Claude orange, then its effort level (`low` to `max`) in dim grey. The effort shows from the first prompt on, and an `/effort` change shows from the next one: Claude Code says the level only when it sends a request. A model that takes no effort shows its name alone.
 - **Context** - a bar, then how full the context window is in percent, then tokens used / window size.
 - **5h / 7d** - percent used of each rate limit, then a countdown to its reset (`↻ 1h24m`). The `5h` and `7d` labels are blue.
 - **Cache** - Robo, then `warm 54m` (minutes before the prompt cache goes cold) or `cold 2h5m` (how long it has been idle), then the hit rate: the share of this session's input tokens the cache served, every response counted, subagents included. Robo bobs while the cache is warm and sits frozen in ice once it is cold; pressing it opens the `/hud-cache` card. The clock restarts at each main-thread request (subagents keep their own cache), picks up a resumed session's idle time, and starts over on `/clear` and `/compact`. It assumes the 1 hour cache: a session on the 5 minute cache goes cold sooner than it shows.
