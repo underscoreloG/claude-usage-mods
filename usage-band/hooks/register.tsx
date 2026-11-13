@@ -21,6 +21,9 @@ const LAYOUTS = ['auto', 'wide', 'narrow'] as const
 const AUTO: (typeof LAYOUTS)[number] = 'auto'
 const layoutAtom = atom({ plugin: 'usage-band', key: 'layout' } as const, AUTO)
 
+// the git worktree the session works in; null in the main checkout or outside git
+const worktreeAtom = atom({ plugin: 'usage-band', key: 'worktree' } as const, null)
+
 // The band's buttons by the name /band-usage <button> takes, with the command each opens
 const BUTTONS = [
   { name: 'flight-recorder', command: 'hud-flight-recorder' },
@@ -163,6 +166,31 @@ export function bar(pct: number, cells = 10): [string, string] {
   return ['▰'.repeat(full), '▰'.repeat(cells - full)]
 }
 
+// The worktree's name when the session's root is a git worktree, else null. Claude Code puts its
+// worktrees at <repo>/.claude/worktrees/<name>; any other worktree is named by its folder, and a
+// folder inside the main checkout is no worktree
+export function worktreeName(root: string, repoRoot: string | undefined): string | null {
+  if (!repoRoot || root === repoRoot) return null
+  const nested = `${repoRoot}/.claude/worktrees/`
+  if (root.startsWith(nested)) return root.slice(nested.length)
+  if (root.startsWith(`${repoRoot}/`)) return null
+  return root.split('/').filter(Boolean).at(-1) ?? null
+}
+
+// the root last read: the repository is read again only when the root moved
+let seenRoot: string | undefined
+async function refreshWorktree($: EngineInterface): Promise<void> {
+  try {
+    const root = await $.session.root()
+    if (root === seenRoot) return
+    seenRoot = root
+    const name = worktreeName(root, (await $.session.repo())?.root)
+    if ((await read($, worktreeAtom)) !== name) await update($, worktreeAtom, () => name)
+  } catch {
+    // no root or repository to read: keep the last name
+  }
+}
+
 async function refresh($: EngineInterface): Promise<void> {
   try {
     const snap = toSnapshot(await $.session.usage())
@@ -186,6 +214,7 @@ export const register: Register = on => {
     const layout = await $.store.get('layout')
     const kept = LAYOUTS.find(l => l === layout)
     if (kept) await update($, layoutAtom, () => kept)
+    await refreshWorktree($)
     await refresh($)
     // the model before the first request; turn.step keeps it current after
     try {
@@ -307,7 +336,9 @@ export const register: Register = on => {
   on('turn.step', async function* ($, e, next) {
     // each main-thread request reads or writes the cache, so its start resets the hour;
     // a subagent's prompt is its own and keeps no cache of the conversation's
+    // EnterWorktree, ExitWorktree or /cd move the root: the next request shows it
     if (e.agentId === undefined) {
+      await refreshWorktree($)
       const t = await $.clock.now()
       await update($, lastAtAtom, () => t)
       await update($, nowAtom, () => t)
@@ -338,6 +369,7 @@ export const register: Register = on => {
     if (!usage) return next(e)
     const model = await read($, modelAtom)
     const effort = await read($, effortAtom)
+    const worktree = await read($, worktreeAtom)
     const now = await read($, nowAtom)
     const elements = $.ui.resolve(e)
     const { Box, Text, Button } = elements
@@ -385,6 +417,7 @@ export const register: Register = on => {
     const cellsWith = (out: ReadonlySet<Drop>) => {
       const s = showing(out)
       const sections: string[] = []
+      if (worktree) sections.push(`⎇ ${worktree}`)
       if (model) sections.push(effort ? `${shortModel(model)} ${effort}` : shortModel(model))
       sections.push(`${s.bar ? '▰'.repeat(8) + ' ' : ''}${pct}%${s.tokens ? ' ' + tokens : ''}`)
       for (const l of limits) sections.push(`${l.name} ${l.pct}%${l.reset && s.resets ? ` ↻ ${l.reset}` : ''}`)
@@ -419,7 +452,7 @@ export const register: Register = on => {
 
     // One line: each group is its value alone, the limits led by a blue "5h" or "7d"
     const group = (value: RenderElement) => <Text wrap="truncate">{value}</Text>
-    // In order: model (and its effort), context, 5h and 7d limits, cache hit, cost
+    // In order: worktree, model (and its effort), context, 5h and 7d limits, cache hit, cost
     const groups: RenderElement[] = []
     if (model) {
       groups.push(
@@ -574,6 +607,8 @@ export const register: Register = on => {
         }),
       )
     }
+
+    if (worktree) groups.unshift(group(<Text color="merged">⎇ {worktree}</Text>))
 
     const separator = <Text dimColor>│</Text>
     // Sections and separators alternate in one row spread with equal gaps, so each separator
